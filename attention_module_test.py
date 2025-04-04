@@ -1,5 +1,5 @@
 from MultiHeadAttention import MultiHeadAttention
-import AirisLoader as rsLoad
+import AirysLoader as rsLoad
 import torch
 
 NUM_WORKERS = 0

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from NormalizationLayer import NormalizationLayer as NormLayer
 from Transformer import Transformer
-class Airis(nn.Module):
+class Airys(nn.Module):
     def __init__(self,cfg):
         super().__init__()
         # handle input embedding

@@ -31,4 +31,10 @@ class Transformer(nn.Module):
         
         x = x + shortcut # add in the shortcut value
 
+        shortcut = x # feed forward shortcut
+        x = self.norm2(x) # normalization before feed forward
+        x = self.ff(x)
+        x = self.drop_shortcut(x)
+        x = x + shortcut
+
         return x

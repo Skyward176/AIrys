@@ -48,7 +48,7 @@ class MultiHeadAttention(nn.Module):
         mask_bool = self.mask.bool()[:num_tokens, :num_tokens]
         attn_scores.masked_fill(mask_bool, -torch.inf)
 
-        attn_weights = torch.softmax(attn_scores/ keys.shape[-1]**0.5, dim = -1)
+        attn_weights = torch.softmax(attn_scores/ keys.shape[-1]**0.5, dim = -1)# matrix form of scaled dot product attention
         context_vec = (attn_weights@values).transpose(1,2)
 
         context_vec = context_vec.contiguous().view(b, num_tokens, self.d_out)
