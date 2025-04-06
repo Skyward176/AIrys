@@ -1,6 +1,6 @@
 import torch.nn as nn
 import torch
-from MultiHeadAttention import MultiHeadAttention
+from MultiHeadAttention import FlashMultiHeadAttention as MultiHeadAttention
 from FeedForwardLayer import FeedForwardLayer
 from NormalizationLayer import NormalizationLayer
 class Transformer(nn.Module):
@@ -11,7 +11,7 @@ class Transformer(nn.Module):
             d_out = cfg["emb_dim"],
             context_length = cfg["context_length"],
             num_heads = cfg["n_heads"],
-            dropout = cfg["drop_rate_attn"],
+            dropout = cfg["drop_rate"],
             qkv_bias = cfg["qkv_bias"]
         ) # attention layer
 
@@ -20,7 +20,7 @@ class Transformer(nn.Module):
         self.norm1 = NormalizationLayer(cfg["emb_dim"]) # normalization layers
         self.norm2 = NormalizationLayer(cfg["emb_dim"]) 
 
-        self.drop_shortcut = nn.Dropout(cfg["drop_rate_shortcut"]) # shortcut dropout
+        self.drop_shortcut = nn.Dropout(cfg["drop_rate"]) # shortcut dropout
 
     def forward(self,x):
         shortcut = x # attention block shortcut

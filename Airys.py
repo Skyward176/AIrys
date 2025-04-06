@@ -8,7 +8,7 @@ class Airys(nn.Module):
         # handle input embedding
         self.tok_emb = nn.Embedding(cfg["vocab_size"], cfg["emb_dim"]) 
         self.pos_emb = nn.Embedding(cfg["context_length"], cfg["emb_dim"])
-        self.drop_emb = nn.Dropout(cfg["drop_rate_emb"])
+        self.drop_emb = nn.Dropout(cfg["drop_rate"])
 
         # transformer blocks
         self.trf_blocks = nn.Sequential(
