@@ -1,5 +1,5 @@
 import torch
-from Airys import Airys as rsModel
+from ..airysModels import AirysGPT2 as rsModel
 import tiktoken
 def generate_text_simple(model, idx, max_new_tokens, context_size):
     # idx is (B, T) array of indices in the current context

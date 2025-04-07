@@ -1,8 +1,8 @@
 import torch.nn as nn
 import torch
-from MultiHeadAttention import FlashMultiHeadAttention as MultiHeadAttention
-from FeedForwardLayer import FeedForwardLayer
-from NormalizationLayer import NormalizationLayer
+from .MultiHeadAttention import FlashMultiHeadAttention as MultiHeadAttention
+from .FeedForwardLayer import FeedForwardLayer
+from .NormalizationLayer import NormalizationLayer
 class Transformer(nn.Module):
     def __init__(self, cfg):
         super().__init__()

@@ -1,10 +1,10 @@
 import matplotlib.pyplot as plt
 import torch
-from gpt2_weights_downloader import download_and_load_gpt2
+from airysLib.gpt2_weights_downloader import download_and_load_gpt2
 import numpy as np
-from Airys import Airys 
-from AirysLoader import create_dataloader as rsLoader
-from AirysGen import generate
+from ..airysModels import airysGPT2
+from ..airysLib.AirysLoader import create_dataloader as rsLoader
+from airysApps.AirysGen import generate
 import tiktoken
 
 def text_to_token_ids(text, tokenizer):
@@ -120,7 +120,7 @@ def main(gpt_config, model_size):
     tokenizer = tiktoken.get_encoding("gpt2")
     torch.manual_seed(123)
 
-    model = Airys(gpt_config)
+    model = airysGPT2(gpt_config)
     load_weights_into_Airys(model, params)
     model.to(device)
     model.eval()

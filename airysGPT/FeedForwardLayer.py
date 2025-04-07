@@ -1,6 +1,6 @@
 import torch.nn as nn
 import torch
-from GELU import GELU
+from .GELU import GELU
 class FeedForwardLayer(nn.Module):
     def __init__(self, cfg):
         super().__init__()

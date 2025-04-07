@@ -1,17 +1,13 @@
-# Copyright (c) Sebastian Raschka under Apache License 2.0 (see LICENSE.txt).
-# Source for "Build a Large Language Model From Scratch"
-#   - https://www.manning.com/books/build-a-large-language-model-from-scratch
-# Code: https://github.com/rasbt/LLMs-from-scratch
-
 import matplotlib.pyplot as plt
 import os
 import torch
 import urllib.request
 import tiktoken
+from ..airysLib.gpt2_weights_downloader import download_and_load_gpt2
 
 from Airys import Airys 
 from AirysLoader import create_dataloader as rsLoader
-from AirysGen import generate
+from AirysGen import generate_text_simple
 
 def text_to_token_ids(text, tokenizer):
     encoded = tokenizer.encode(text)
@@ -62,7 +58,7 @@ def generate_and_print_sample(model, tokenizer, device, start_context):
     context_size = model.pos_emb.weight.shape[0]
     encoded = text_to_token_ids(start_context, tokenizer).to(device)
     with torch.no_grad():
-        token_ids = generate(
+        token_ids = generate_text_simple(
             model=model, idx=encoded,
             max_new_tokens=50,
             context_size=context_size,
@@ -151,12 +147,9 @@ def main(gpt_config, settings):
     # Initialize model
     ##############################
 
+    settings,params = download_and_load_gpt2(model_size="124M", models_dir="gpt-2")
     model = Airys(gpt_config)
-    try:
-        model.load_state_dict(torch.load("model.pth", weights_only=True))
-    except FileNotFoundError:
-        print("Model weights not found. Starting training from scratch.")
-
+    model.load_state_dict(torch.load("model.pth", weights_only=True))
     model.to(device)  # no assignment model = model.to(device) necessary for nn.Module classes
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=settings["learning_rate"], weight_decay=settings["weight_decay"]
@@ -204,36 +197,54 @@ def main(gpt_config, settings):
 
     return train_losses, val_losses, tokens_seen, model
 
+GPT_CONFIG_124M = {
+    "vocab_size": 50257,    # Vocabulary size
+    "context_length": 1024,  # Shortened context length (orig: 1025)
+    "emb_dim": 768,         # Embedding dimension
+    "n_heads": 12,          # Number of attention heads
+    "n_layers": 12,         # Number of layers
+    "drop_rate_emb": 0.1,       # Dropout rate
+    "drop_rate_attn": 0.1,       # Dropout rate
+    "drop_rate_shortcut": 0.1,       # Dropout rate
+    "qkv_bias": False       # Query-key-value bias
+}
 
+
+def get_config(base_config, model_name="gpt2-small"):
+    GPT_CONFIG = base_config.copy()
+
+    if model_name == "gpt2-small":
+        GPT_CONFIG["emb_dim"] = 768
+        GPT_CONFIG["n_layers"] = 12
+        GPT_CONFIG["n_heads"] = 12
+
+    elif model_name == "gpt2-medium":
+        GPT_CONFIG["emb_dim"] = 1024
+        GPT_CONFIG["n_layers"] = 24
+        GPT_CONFIG["n_heads"] = 16
+
+    elif model_name == "gpt2-large":
+        GPT_CONFIG["emb_dim"] = 1280
+        GPT_CONFIG["n_layers"] = 36
+        GPT_CONFIG["n_heads"] = 20
+
+    elif model_name == "gpt2-xl":
+        GPT_CONFIG["emb_dim"] = 1600
+        GPT_CONFIG["n_layers"] = 48
+        GPT_CONFIG["n_heads"] = 25
+
+    else:
+        raise ValueError(f"Incorrect model name {model_name}")
+
+    return GPT_CONFIG
 
 if __name__ == "__main__":
 
-    BASE_CONFIG = {
-        "vocab_size": 50257,    # Vocabulary size
-        "context_length": 1024,  # Shortened context length (orig: 1025)
-        "drop_rate": 0.0,       # Dropout rate
-        "qkv_bias": True       # Query-key-value bias
-    }
-
-    model_configs = {
-        "gpt2-small (124M)": {"emb_dim": 768, "n_layers": 12, "n_heads": 12},
-        "gpt2-medium (355M)": {"emb_dim": 1024, "n_layers": 24, "n_heads": 16},
-        "gpt2-large (774M)": {"emb_dim": 1280, "n_layers": 36, "n_heads": 20},
-        "gpt2-xl (1558M)": {"emb_dim": 1600, "n_layers": 48, "n_heads": 25},
-    }
-
-    CHOOSE_MODEL = "gpt2-small (124M)"  # Choose the model you want to use
-    model_size = CHOOSE_MODEL.split(" ")[-1].lstrip("(").rstrip(")")
-
-    BASE_CONFIG.update(model_configs[CHOOSE_MODEL])
-
-    print("GPT Config:", BASE_CONFIG)
-    print("Model Size:", model_size)
-
+    config = get_config(GPT_CONFIG_124M, "gpt2-small")
     OTHER_SETTINGS = {
         "learning_rate": 5e-4,
         "num_epochs": 1,
-        "batch_size":12,
+        "batch_size":1,
         "weight_decay": 0.1
     }
 
@@ -241,7 +252,7 @@ if __name__ == "__main__":
     # Initiate training
     ###########################
 
-    train_losses, val_losses, tokens_seen, model = main(BASE_CONFIG, OTHER_SETTINGS)
+    train_losses, val_losses, tokens_seen, model = main(config, OTHER_SETTINGS)
 
     ###########################
     # After training
@@ -254,5 +265,5 @@ if __name__ == "__main__":
 
     # Save and load model
     torch.save(model.state_dict(), "model.pth")
-    model = Airys(BASE_CONFIG)
+    model = Airys(config)
     model.load_state_dict(torch.load("model.pth", weights_only=True))

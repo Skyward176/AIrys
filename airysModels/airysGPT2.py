@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
-from NormalizationLayer import NormalizationLayer as NormLayer
-from Transformer import Transformer
-class Airys(nn.Module):
+from airysGPT.NormalizationLayer import NormalizationLayer as NormLayer
+from airysGPT.Transformer import Transformer
+class airysGPT2(nn.Module):
     def __init__(self,cfg):
         super().__init__()
         # handle input embedding
@@ -36,4 +36,3 @@ class Airys(nn.Module):
         logits = self.out_head(x) # turn to logits
         
         return logits
-        

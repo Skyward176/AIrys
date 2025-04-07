@@ -1,3 +1,5 @@
+# Model
+model.pth
 # Training Data
 training_data/*
 training_data/
