@@ -8,16 +8,7 @@ from airysModels.airysGPT2 import airysGPT2
 from airysLib.AirysLoader import create_dataloader as rsLoader
 from airysApps.AirysGen import generate
 
-def text_to_token_ids(text, tokenizer):
-    encoded = tokenizer.encode(text)
-    encoded_tensor = torch.tensor(encoded).unsqueeze(0)  # add batch dimension
-    return encoded_tensor
-
-
-def token_ids_to_text(token_ids, tokenizer):
-    flat = token_ids.squeeze(0)  # remove batch dimension
-    return tokenizer.decode(flat.tolist())
-
+from airysLib.tokenIO import text_to_token_ids, token_ids_to_text
 
 def calc_loss_batch(input_batch, target_batch, model, device):
     input_batch, target_batch = input_batch.to(device), target_batch.to(device)
@@ -276,6 +267,6 @@ if __name__ == "__main__":
     plt.savefig("loss.pdf")
 
     # Save and load model
-    torch.save(model.state_dict(), "model.pth")
+    torch.save(model.state_dict(), "../model.pth")
     model = airysGPT2(BASE_CONFIG)
     model.load_state_dict(torch.load("model.pth", weights_only=True))
