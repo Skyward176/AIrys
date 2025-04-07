@@ -1,13 +1,7 @@
-# Copyright (c) Sebastian Raschka under Apache License 2.0 (see LICENSE.txt).
-# Source for "Build a Large Language Model From Scratch"
-#   - https://www.manning.com/books/build-a-large-language-model-from-scratch
-# Code: https://github.com/rasbt/LLMs-from-scratch
-
 import matplotlib.pyplot as plt
-import os
 import torch
-import urllib.request
 import tiktoken
+import math
 
 from airysModels.airysGPT2 import airysGPT2
 
@@ -75,24 +69,50 @@ def generate_and_print_sample(model, tokenizer, device, start_context):
     model.train()
 
 
-def train_model_simple(model, train_loader, val_loader, optimizer, device, num_epochs,
-                       eval_freq, eval_iter, start_context, tokenizer):
+def trainAirys(model, train_loader, val_loader, optimizer, device, num_epochs,
+                       eval_freq, eval_iter, start_context, tokenizer,
+                       init_learn_rate, min_learn_rate, warmup_proportion, max_norm):
     # Initialize lists to track losses and tokens seen
     train_losses, val_losses, track_tokens_seen = [], [], []
     tokens_seen = 0
     global_step = -1
 
+    peak_learn_rate = optimizer.param_groups[0]["lr"]
+    min_learn_rate = 0.1 * init_learn_rate
+    track_lrs = []
+
+    total_steps = len(train_loader) * num_epochs
+    warmup_steps = warmup_proportion * total_steps
+    lr_increment = (peak_learn_rate - init_learn_rate) / warmup_steps
     # Main training loop
     for epoch in range(num_epochs):
         model.train()  # Set model to training mode
 
         for input_batch, target_batch in train_loader:
             optimizer.zero_grad()  # Reset loss gradients from previous batch iteration
+
+            global_step += 1
+
+            if global_step < warmup_steps:
+                lr = init_learn_rate + global_step*lr_increment
+            else:
+                progress = ((global_step - warmup_steps)/
+                            (total_steps - warmup_steps))
+                lr = min_learn_rate + (peak_learn_rate-min_learn_rate) * 0.5 *(
+                1+ math.cos(math.pi*progress))
+                
+
+            for param_group in optimizer.param_groups:
+                param_group["lr"] = lr
+            track_lrs.append(optimizer.param_groups[0]["lr"])
             loss = calc_loss_batch(input_batch, target_batch, model, device)
             loss.backward()  # Calculate loss gradients
+
+            if global_step >= warmup_steps:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+
             optimizer.step()  # Update model weights using loss gradients
             tokens_seen += input_batch.numel()
-            global_step += 1
 
             # Optional evaluation step
             if global_step % eval_freq == 0:
@@ -103,6 +123,7 @@ def train_model_simple(model, train_loader, val_loader, optimizer, device, num_e
                 track_tokens_seen.append(tokens_seen)
                 print(f"Ep {epoch+1} (Step {global_step:06d}): "
                       f"Train loss {train_loss:.3f}, Val loss {val_loss:.3f}")
+                print(f"current learning rate : {lr}\n")
 
                 generate_and_print_sample(
                     model, tokenizer, device, start_context
@@ -160,12 +181,8 @@ def main(gpt_config, settings):
 
     model.to(device)  # no assignment model = model.to(device) necessary for nn.Module classes
     optimizer = torch.optim.AdamW(
-        model.parameters(), lr=settings["learning_rate"], weight_decay=settings["weight_decay"]
+        model.parameters(), lr=settings["peak_learn_rate"], weight_decay=settings["weight_decay"]
     )
-
-    ##############################
-    # Set up dataloaders
-    ##############################
 
     # Train/validation ratio
     train_ratio = 0.90
@@ -191,16 +208,17 @@ def main(gpt_config, settings):
         num_workers=0
     )
 
-    ##############################
-    # Train model
-    ##############################
 
     tokenizer = tiktoken.get_encoding("gpt2")
 
-    train_losses, val_losses, tokens_seen = train_model_simple(
+    train_losses, val_losses, tokens_seen = trainAirys(
         model, train_loader, val_loader, optimizer, device,
         num_epochs=settings["num_epochs"], eval_freq=5, eval_iter=1,
-        start_context="Hi my name is AIrys",tokenizer=tokenizer
+        start_context="Hi my name is AIrys",tokenizer=tokenizer,
+        min_learn_rate=settings["min_learn_rate"],
+        init_learn_rate=settings["init_learn_rate"],
+        warmup_proportion=settings["warmup_proportion"],
+        max_norm = settings["max_norm"]
     )
 
     return train_losses, val_losses, tokens_seen, model
@@ -232,10 +250,14 @@ if __name__ == "__main__":
     print("Model Size:", model_size)
 
     OTHER_SETTINGS = {
-        "learning_rate": 5e-4,
+        "peak_learn_rate": 0.001,
+        "init_learn_rate": 3e-05,
+        "min_learn_rate": 1e-6,
         "num_epochs": 1,
-        "batch_size":12,
-        "weight_decay": 0.1
+        "batch_size":2,
+        "weight_decay": 0.1,
+        "warmup_proportion": 0.2,
+        "max_norm":1.0
     }
 
     ###########################
