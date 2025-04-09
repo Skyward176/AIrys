@@ -2,7 +2,6 @@
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import torch
-from transformers import T5Tokenizer
 import tiktoken
 import math
 from pathlib import Path
@@ -13,6 +12,7 @@ from airysApps.AirysGen import generate
 from airysLib.Config import ConfigSU
 
 from airysLib.tokenIO import text_to_token_ids, token_ids_to_text
+import time
 
 
 def train_test(epochs,config):
@@ -136,10 +136,20 @@ def trainAirys(model, config, train_loader, val_loader, optimizer, device,
                 val_losses.append(val_loss)
                 track_tokens_seen.append(tokens_seen)
                 total_tokens = len(train_loader) * config.batch_size * config.context_length
+                if global_step == 0:
+                    start_time = time.time()
+
                 percent_tokens_seen = (tokens_seen / total_tokens) * 100
+                elapsed_time = time.time() - start_time
+                tokens_per_second = tokens_seen / elapsed_time
+                remaining_tokens = total_tokens - tokens_seen
+                time_remaining = remaining_tokens / tokens_per_second if tokens_per_second > 0 else float('inf')
+                time_remaining_minutes = time_remaining / 60
+
                 print(f"Ep {epoch+1} (Step {global_step:06d}): "
-                    f"Train loss {train_loss:.3f}, Val loss {val_loss:.3f}")
+                      f"Train loss {train_loss:.3f}, Val loss {val_loss:.3f}")
                 print(f"Tokens seen: {tokens_seen} ({percent_tokens_seen:.2f}%)")
+                print(f"Time remaining: {time_remaining_minutes:.2f} minutes")
                 # generate a sample
                 # generate_and_print_sample(
                 #     model, config.context_length, tokenizer, device, start_context
@@ -223,8 +233,8 @@ if __name__ == "__main__":
     config = ConfigSU(
         vocab_size = 32000, #default, overridden later
         emb_dim = 1600,
-        n_layers = 48,
-        n_heads = 24,
+        n_layers = 4,
+        n_heads = 2,
         latent_qkv_dim = 128,
         d_rope = 16,
         context_length = 1024,
