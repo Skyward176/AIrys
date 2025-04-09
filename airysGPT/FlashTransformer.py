@@ -1,9 +1,10 @@
 import torch.nn as nn
+from .MultiHeadAttention import FlashMultiHeadAttention as MultiHeadAttention
 import torch
-from .MultiHeadAttention import MultiHeadAttention as MultiHeadAttention
 from .FeedForwardLayer import FeedForwardLayer
 from .NormalizationLayer import NormalizationLayer
-class Transformer(nn.Module):
+
+class FlashTransformer(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.att = MultiHeadAttention(

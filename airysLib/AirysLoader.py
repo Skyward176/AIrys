@@ -1,4 +1,5 @@
-import torch, tiktoken
+import torch
+from transformers import T5Tokenizer 
 from torch.utils.data import Dataset, DataLoader
 
 class AirisDataset(Dataset):
@@ -6,7 +7,7 @@ class AirisDataset(Dataset):
         self.input_ids = []
         self.target_ids = []
 
-        token_ids = tokenizer.encode(txt, allowed_special={"<|endoftext|>"})
+        token_ids = tokenizer.encode(txt) # encode the text into token ids
 
         for i in range (0, len(token_ids) - max_length, stride): # stride here refers to how far window shifts per iteration. Max length is how long a window is.
             input_chunk = token_ids[i:i + max_length] # grab a chunk
@@ -23,7 +24,7 @@ class AirisDataset(Dataset):
         return self.input_ids[idx], self.target_ids[idx]
     
 def create_dataloader(txt, batch_size, max_length, stride, shuffle=True, drop_last=True, num_workers = 0):
-    tokenizer = tiktoken.get_encoding("gpt2")
+    tokenizer = T5Tokenizer.from_pretrained("t5-small")
 
     dataset = AirisDataset(txt, tokenizer, max_length, stride)
     
