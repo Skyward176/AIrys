@@ -2,6 +2,7 @@
 gpt-2
 .chainlit
 model.pth
+models
 # Training Data
 training_data/*
 training_data/

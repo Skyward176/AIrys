@@ -9,7 +9,7 @@ from airysModels.airysDeep import airysDeep
 
 from airysLib.AirysLoader import create_dataloader as rsLoader
 from airysApps.AirysGen import generate
-from airysLib.config import Config
+from airysLib.config import initDeep as Config
 
 from airysLib.tokenIO import text_to_token_ids, token_ids_to_text
 
