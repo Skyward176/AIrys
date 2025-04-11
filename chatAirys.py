@@ -4,43 +4,44 @@ import sys
 import tiktoken
 import torch
 import chainlit
-from airysApps.AirysGen import generate
-from airysModels.airysGPT2 import airysGPT2
+from airySU.generateSU import generate
+from airysModels.airySU import airySU
 from airysLib.tokenIO import text_to_token_ids, token_ids_to_text
+from airysLib.Config import ConfigSU
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def get_model_and_tokenizer():
-    """
-    Code to load a GPT-2 model with pretrained weights generated in chapter 5.
-    This requires that you run the code in chapter 5 first, which generates the necessary model.pth file.
-    """
 
-    GPT_CONFIG_124M = {
-        "vocab_size": 50257,    # Vocabulary size
-        "context_length": 1024,  # Shortened context length (orig: 1024)
-        "emb_dim": 768,         # Embedding dimension
-        "n_heads": 12,          # Number of attention heads
-        "n_layers": 12,         # Number of layers
-        "drop_rate": 0.1,       # Dropout rate
-        "qkv_bias": True       # Query-key-value bias
-    }
-
+    # config
+    config = ConfigSU(
+        vocab_size = 32000, # default, overwritten later
+        emb_dim = 1024,
+        n_layers = 32,
+        n_heads = 20,
+        latent_qkv_dim = 128,
+        d_rope = 16,
+        context_length = 2048,
+        batch_size = 1,
+        hidden_dim = 2048,
+        dtype= torch.bfloat16,  # Use float16 for training
+    )
     tokenizer = tiktoken.get_encoding("gpt2")
+    config.vocab_size = tokenizer.n_vocab # set vocab size to the tokenizer vocab size
 
-    model_path = Path(".") / "model.pth"
+    model_path = Path(".") / "models/airySU.pth"
 
     if not model_path.exists():
         print(f"Could not find the {model_path} file. Please run the chapter 5 code (ch05.ipynb) to generate the model.pth file.")
         sys.exit()
 
     checkpoint = torch.load(model_path, weights_only=True)
-    model = airysGPT2(GPT_CONFIG_124M)
+    model = airySU(config)
     model.load_state_dict(checkpoint)
     model.to(device)
 
-    return tokenizer, model, GPT_CONFIG_124M
+    return tokenizer, model, config
 
 
 # Obtain the necessary tokenizer and model files for the chainlit function below
@@ -56,7 +57,7 @@ async def main(message: chainlit.Message):
         model=model,
         idx=text_to_token_ids(message.content, tokenizer).to(device),  # The user text is provided via as `message.content`
         max_new_tokens=50,
-        context_size=model_config["context_length"],
+        context_size=model_config.context_length,
         top_k=1,
         temperature=0.0
     )

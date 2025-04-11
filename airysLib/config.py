@@ -1,9 +1,9 @@
 # For standardizing how i handle configurations of model parameters
-
+import torch
 class ConfigSU():
     def __init__(self, vocab_size=32000, emb_dim = 1024, n_layers=2, n_heads=8, latent_qkv_dim=128, 
                 d_rope=16, context_length=1024, batch_size=1, 
-                ffn_dim=384, device_groups=4, drop_rate = 0.1):
+                ffn_dim=384, device_groups=4, hidden_dim = 5120, dtype=torch.float32):
         super().__init__()
         self.vocab_size = vocab_size
         self.emb_dim = emb_dim
@@ -13,7 +13,8 @@ class ConfigSU():
         self.d_rope = d_rope
         self.context_length = context_length
         self.batch_size = batch_size
-        self.drop_rate = drop_rate
+        self.hidden_dim = hidden_dim
+        self.dtype = dtype
 
 class ConfigDeep():
     def __init__(self, vocab_size=32000, d_in = 5120, d_out=5120, n_layers=2, n_heads=8, latent_qkv_dim=128, 

@@ -1,6 +1,6 @@
 import torch
 def text_to_token_ids(text, tokenizer):
-    encoded = tokenizer.encode(text)
+    encoded = tokenizer.encode(text) + [50256]  # Add the end of sequence
     encoded_tensor = torch.tensor(encoded).unsqueeze(0)  # add batch dimension
     return encoded_tensor
 

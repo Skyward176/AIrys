@@ -9,24 +9,22 @@ class airySU(nn.Module):
     def __init__(self, config):
         super().__init__()
         # handle input embedding
-        self.tok_emb = nn.Embedding(config.vocab_size, config.emb_dim) 
-        self.drop_emb = nn.Dropout(config.drop_rate) # embedding dropout
+        self.tok_emb = nn.Embedding(config.vocab_size, config.emb_dim, dtype=config.dtype) # embedding layer for the tokens
         # transformer blocks
         self.trf_blocks = nn.ModuleList(
             [SUTransformer(config) for _ in range(config.n_layers)]
         )
 
         # normalize output
-        self.final_norm = LayerNorm(config.emb_dim)
+        self.final_norm = LayerNorm(config.emb_dim, dtype=config.dtype)
 
-        self.out_head = nn.Linear(config.emb_dim, config.vocab_size, bias=False) # run outputs through a final linear layer
+        self.out_head = nn.Linear(config.emb_dim, config.vocab_size, bias=False, dtype=config.dtype) # run outputs through a final linear layer
 
     def forward (self, in_idx): # take the x value of the tokens we're working on
         batch_size, seq_len = in_idx.shape
         x = self.tok_emb(in_idx)
-        x = self.drop_emb(x) # embedding dropout
         for block in self.trf_blocks:
-            x, _ = block(x)
+            x, _ = block(x, batch_size, seq_len)
 
         x = self.final_norm(x) # normalize
 
