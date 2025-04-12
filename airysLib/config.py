@@ -1,5 +1,38 @@
 # For standardizing how i handle configurations of model parameters
 import torch
+
+
+class ConfigLlama():
+    def __init__(self,
+                vocab_size=128_256,
+                context_length=131_072,
+                emb_dim = 2048,
+                n_heads=32,
+                n_layers=16,
+                hidden_dim = 8192,
+                n_kv_groups = 8,
+                rope_base = 500_000.0,
+                batch_size=1, 
+                dtype=torch.float32,
+                rope_freq = {
+                        "factor": 32.0,
+                        "low_freq_factor": 1.0,
+                        "high_freq_factor": 4.0,
+                        "original_context_length": 8192
+                }
+        ):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.context_length = context_length
+        self.emb_dim = emb_dim
+        self.n_heads = n_heads
+        self.n_layers = n_layers
+        self.hidden_dim = hidden_dim
+        self.n_kv_groups = n_kv_groups
+        self.rope_base = rope_base
+        self.batch_size = batch_size
+        self.dtype = dtype
+        self.rope_freq = rope_freq
 class ConfigSU():
     def __init__(self, vocab_size=32000, emb_dim = 1024, n_layers=2, n_heads=8, latent_qkv_dim=128, 
                 d_rope=16, context_length=1024, batch_size=1, 
