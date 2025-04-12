@@ -12,7 +12,7 @@ class FeedForward(nn.Module):
     def forward(self, x):
         x_fc1 = self.fc1(x)
         x_fc2 = self.fc2(x)
-        x = torch.silu(x_fc1) * x_fc2
+        x = torch.nn.functional.silu(x_fc1) * x_fc2
         return self.fc3(x)
 def precompute_rope_params(head_dim, theta_base=10_000, context_length =4096, freq_config=None):
 
@@ -61,7 +61,7 @@ def compute_rope(x, cos, sin):
     x2 = x[..., head_dim // 2:]
 
     cos = cos[:seq_len, :].unsqueeze(0).unsqueeze(0)
-    cos = sin[:seq_len, :].unsqueeze(0).unsqueeze(0)
+    sin = sin[:seq_len, :].unsqueeze(0).unsqueeze(0)
 
     rotated = torch.cat((-x2, x1), dim=-1)
 
@@ -115,7 +115,7 @@ class GroupedQueryAttention(nn.Module):
 
         mask, cos, sin = SharedBuffers.get_buffers(context_length, self.head_dim, rope_base, rope_config, dtype)
 
-        self.register_buffer('mask', mask)
+        self.register_buffer("mask", mask)
         self.register_buffer("cos", cos)
         self.register_buffer("sin", sin)
 
@@ -165,22 +165,25 @@ class TransformerBlock(nn.Module):
             d_out=config.emb_dim,
             context_length=config.context_length,
             num_heads=config.n_heads,
+            num_kv_groups=config.n_kv_groups,
+            rope_base=config.rope_base,
+            rope_config=config.rope_freq,
             dtype=config.dtype
         )
         self.ff = FeedForward(config)
 
-        self.norm1 = torch.nn.RMSNorm(config.emb_dim)
-        self.norm2 = torch.nn.RMSNorm(config.emb_dim)
+        self.norm1 = torch.nn.RMSNorm(config.emb_dim, eps=1e-5)
+        self.norm2 = torch.nn.RMSNorm(config.emb_dim, eps=1e-5)
     def forward(self, x):
         shortcut = x
         x = self.norm1(x)
-        x = self.att(x)
+        x = self.att(x.to(torch.bfloat16))
         
         x = x+shortcut
 
         shortcut = x
         x = self.norm2(x)
-        x = self.ff(x)
+        x = self.ff(x.to(torch.bfloat16))
         x = x+shortcut
 
         return x
@@ -193,7 +196,7 @@ class airysLlama(nn.Module):
             *[TransformerBlock(config) for _ in range(config.n_layers)]
         )
 
-        self.final_norm = torch.nn.RMSNorm(config.emb_dim)
+        self.final_norm = torch.nn.RMSNorm(config.emb_dim, eps=1e-5)
 
         self.out_head = nn.Linear(config.emb_dim, config.vocab_size, bias=False, dtype = config.dtype)
 
@@ -204,5 +207,5 @@ class airysLlama(nn.Module):
         
         x =self.trf_blocks(x)
         x = self.final_norm(x)
-        logits = self.out_head(x)
+        logits = self.out_head(x.to(torch.bfloat16))
         return logits
