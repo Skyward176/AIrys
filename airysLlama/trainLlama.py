@@ -6,6 +6,10 @@ from airysLib.config import ConfigLlama
 from safetensors.torch import load_file
 from airysLlama.LlamaGenerate import generate, text_to_token_ids, token_ids_to_text
 from airysLlama.loadLlamaFromPretrained import loadLlamaFromPretrained
+from airysLlama.apply_llama_chat_template import apply_chat_template
+from datasets import load_dataset
+
+from transformers import Trainer, TrainingArguments
 LLAMA_SIZE_STR = "1B"
 
 
@@ -48,11 +52,47 @@ def main():
 
     model, tokenizer, chat_tokenizer, config = loadLlamaFromPretrained("1B") 
     model.to(device)
-    test_llama(model,
-                tokenizer=tokenizer,
-                chat_tokenizer=chat_tokenizer,
-                config = config,
-                device = device
-            )
+    dataset = load_dataset("csv", data_files="training_data/fine/frijoles_100_conversational.csv", split="train")
+    dataset = dataset.map(apply_chat_template)
+    def tokenize_function(input):
+        tokens = tokenizer(input['prompt'], padding="max_length", truncation=True, max_length=128)
+        # Set padding token labels to -100 to ignore them in loss calculation
+        tokens['labels'] = [
+            -100 if token == tokenizer.pad_token_id else token for token in tokens['input_ids']
+        ]
+        return tokens
+    tokenized_dataset = dataset.map(tokenize_function)
+    tokenized_dataset = tokenized_dataset.remove_columns(['question', 'answer', 'prompt'])
+
+    model.train()
+    training_args = TrainingArguments(
+        output_dir="models/airysLlama/results",
+        eval_strategy="steps",  # to evaluate during training
+        eval_steps=40,
+        logging_steps=40,
+        save_steps=150,
+        per_device_train_batch_size=2,  # Adjust based on your hardware
+        per_device_eval_batch_size=2,
+        num_train_epochs=2,  # How many times to loop through the dataset
+        fp16=False,  # Must be False for MacBooks
+        report_to="none", # Here we can use something like tensorboard to see the training metrics
+        log_level="info",
+        learning_rate=1e-5, # Would avoid larger values here
+        max_grad_norm=2 # Clipping the gradients is always a good idea
+    )
+
+    trainer = Trainer(
+        model=model,
+        args = training_args,
+        train_dataset = tokenized_dataset["train"],
+        eval_dataset=tokenized_dataset["test"],
+        tokenizer = tokenizer 
+    )
+
+    trainer.train()
+
+    trainer.save_model("models/airysLlama/airys_llama_character")
+    trainer.save_pretrained("models/airysLlama/airys_llama_character")
+
 if __name__ == "__main__":
     main()
