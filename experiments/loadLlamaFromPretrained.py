@@ -2,7 +2,8 @@ import torch
 from airysLib.config import ConfigLlama
 from airysLlama.airysLlama import airysLlama
 from huggingface_hub import hf_hub_download
-from airysLlama.LlamaTokenizer import Tokenizer, ChatFormat
+#from airysLlama.LlamaTokenizer import Tokenizer, ChatFormat
+from transformers import AutoTokenizer
 from safetensors.torch import load_file
 
 def assign(left, right, tensor_name="unknown"):
@@ -77,9 +78,9 @@ def load_weights_into_llama(model, param_config, params):
     else:
         model.out_head.weight = assign(model.out_head.weight, params["model.embed_tokens.weight"], "model.embed_tokens.weight")
         print("Model uses weight tying.")
-def loadLlamaFromPretrained(LLAMA_SIZE_STR):
+def loadLlamaFromPretrained(LLAMA_SIZE_STR, dtype=torch.bfloat16):
     config = ConfigLlama(
-        dtype=torch.bfloat16
+        dtype=dtype
     )
     if LLAMA_SIZE_STR == "3B":
         config.vocab_size = 128_256
@@ -97,14 +98,17 @@ def loadLlamaFromPretrained(LLAMA_SIZE_STR):
             "original_context_length": 8192
         }
 
+    repo_id=f"meta-llama/Llama-3.2-{LLAMA_SIZE_STR}-Instruct"
     tokenizer_file_path = hf_hub_download(
         repo_id=f"meta-llama/Llama-3.2-{LLAMA_SIZE_STR}-Instruct",
         filename="original/tokenizer.model",
         local_dir=f"models/Llama-3.2-{LLAMA_SIZE_STR}-Instruct"
     )
 
-    tokenizer = Tokenizer(tokenizer_file_path)
-    chat_tokenizer = ChatFormat(tokenizer)
+    # tokenizer = Tokenizer(tokenizer_file_path)
+    # chat_tokenizer = ChatFormat(tokenizer)
+    tokenizer = AutoTokenizer.from_pretrained(repo_id, use_fast=False)
+    tokenizer.pad_token = tokenizer.eos_token
     def rescale_theta(theta_old, context_length_old, context_length_new):
         scaling_factor = context_length_new / context_length_old
         print(f"Rescaling theta from {context_length_old} to {context_length_new} with scaling factor {scaling_factor}")
@@ -115,27 +119,29 @@ def loadLlamaFromPretrained(LLAMA_SIZE_STR):
     config.context_length = 16384
     model = airysLlama(config)
     print("Requesting model weights from HuggingFace Hub...")
-    if LLAMA_SIZE_STR == "1B":
-        weights_file = hf_hub_download(
-            repo_id=f"meta-llama/Llama-3.2-{LLAMA_SIZE_STR}-Instruct",
-            filename=f"model.safetensors",
-            local_dir=f"models/Llama-3.2-{LLAMA_SIZE_STR}-Instruct" 
-        )
-        combined_weights = load_file(weights_file)
-    else:
-        combined_weights = {}
-        for i in range(1, 3):
-            weights_file = hf_hub_download(
-                repo_id=f"meta-llama/Llama-3.2-{LLAMA_SIZE_STR}-Instruct",
-                filename=f"model-0000{i}-of-00002.safetensors",
-                local_dir=f"models/Llama-3.2-{LLAMA_SIZE_STR}-Instruct"
-            )
-            current_weights = load_file(weights_file)
-            combined_weights.update(current_weights)
-
+    #if LLAMA_SIZE_STR == "1B":
+    #    weights_file = hf_hub_download(
+    #        repo_id=f"meta-llama/Llama-3.2-{LLAMA_SIZE_STR}-Instruct",
+    #        filename=f"model.safetensors",
+    #        local_dir=f"models/Llama-3.2-{LLAMA_SIZE_STR}-Instruct" 
+    #    )
+    #    combined_weights = load_file(weights_file)
+    #else:
+    #    combined_weights = {}
+    #    for i in range(1, 3):
+    #        weights_file = hf_hub_download(
+    #            repo_id=f"meta-llama/Llama-3.2-{LLAMA_SIZE_STR}-Instruct",
+    #            filename=f"model-0000{i}-of-00002.safetensors",
+    #            local_dir=f"models/Llama-3.2-{LLAMA_SIZE_STR}-Instruct"
+    #        )
+    #        current_weights = load_file(weights_file)
+    #        combined_weights.update(current_weights)
+    combined_weights = load_file(
+        "models/airysLlama/airys_llama_character/model.safetensors"
+    )
 
     load_weights_into_llama(model, config, combined_weights)
     
     del(combined_weights)
     print("Model loaded into device")
-    return model, tokenizer, chat_tokenizer, config
+    return model, tokenizer, config
