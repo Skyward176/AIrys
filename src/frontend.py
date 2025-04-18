@@ -1,8 +1,10 @@
 import tkinter as tk
-from transformers import AutoTokenizer, pipeline, BitsAndBytesConfig, Conv1D, AutoModelForCausalLM
+from transformers import SpeechT5Processor, SpeechT5ForTextToSpeech, SpeechT5HifiGan, pipeline
 import torch
-
-from peft import LoraConfig, PeftConfig, get_peft_model
+from loadAirys import loadAirys
+import torchaudio
+import pyaudio
+import numpy as np
 
 if torch.mps.is_available():
     device = torch.device("mps")
@@ -12,43 +14,25 @@ else:
     device = torch.device("cpu")
 
 
+# Load LLM
+model, tokenizer = loadAirys(repo_id = "src/models/airysLlama/airys_llama_character_8B")
+model.to(device)
 
-repo_id="src/models/airysLlama/airys_llama_character_8B"
-nf4_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_use_double_quant=True,
-    bnb_4bit_quant_type="nf4",
-    bnb_4bit_compute_dtype=torch.bfloat16,
-)
-model = AutoModelForCausalLM.from_pretrained(
-    repo_id,
-    device_map="auto",
-    quantization_config=nf4_config,
-)
-def get_specific_layer_names(model):
-    # Create a list to store the layer names
-    layer_names = []
-    
-    # Recursively visit all modules and submodules
-    for name, module in model.named_modules():
-        # Check if the module is an instance of the specified layers
-        if isinstance(module, (torch.nn.Linear, torch.nn.Embedding, torch.nn.Conv2d, Conv1D)):
-            # model name parsing 
 
-            layer_names.append('.'.join(name.split('.')[4:]).split('.')[0])
-    
-    return layer_names
-loraConfig = LoraConfig(
-    r=16,
-    lora_alpha=32,
-    target_modules=get_specific_layer_names(model),
-    lora_dropout=0.05,
-    bias="none",
-    task_type="CAUSAL_LM",
-)
-model = get_peft_model(model, loraConfig)
-tokenizer = AutoTokenizer.from_pretrained(repo_id, use_fast=True)
-tokenizer.pad_token = tokenizer.eos_token
+processor = SpeechT5Processor.from_pretrained("microsoft/speecht5_tts")
+tts_model = SpeechT5ForTextToSpeech.from_pretrained("microsoft/speecht5_tts").to(device)
+vocoder = SpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan").to(device)
+
+speaker_embeddings = torch.zeros(1,512).to(device)
+#speaker_embeddings = torch.load("rvc/miku_default_rvc/weights/miku_default_rvc.pth")  # or load xvectors from a file
+def generate_speech(text, speaker_embeddings):
+    inputs = processor(text=text, return_tensors="pt").to(device)
+    speech = tts_model.generate(inputs["input_ids"], speaker_embeddings=speaker_embeddings, vocoder=vocoder)
+    return speech
+
+
+
+
 
 pipe = pipeline(
     "text-generation",
@@ -59,7 +43,7 @@ pipe = pipeline(
 
 # Create the main window
 root = tk.Tk()
-root.title("Basic Tkinter Window")
+root.title("AIrys <3")
 
 # Create a Text widget for user input
 input_textbox = tk.Text(root, width=40, height=10)
@@ -98,6 +82,33 @@ def submit_input():
     response_textbox.delete("1.0", tk.END)
     response_textbox.insert(tk.END, response)
     response_textbox.config(state=tk.DISABLED)
+
+    audio = generate_speech(response, speaker_embeddings=speaker_embeddings)
+
+    # Ensure the tensor is 2D
+    if audio.dim() == 1:  # If the tensor is 1D, add a channel dimension
+        audio = audio.unsqueeze(0)
+
+    # Convert the tensor to a NumPy array
+    audio_np = audio.squeeze().cpu().numpy()
+
+
+    # Initialize PyAudio
+    p = pyaudio.PyAudio()
+
+    # Open a stream to play audio
+    stream = p.open(format=pyaudio.paFloat32,
+                    channels=1,
+                    rate=20000,  # Adjust the rate to match the slowdown
+                    output=True)
+
+    # Play the audio
+    stream.write(audio_np.astype(np.float32).tobytes())
+
+    # Close the stream
+    stream.stop_stream()
+    stream.close()
+    p.terminate()
 
 # Create a Submit button
 submit_button = tk.Button(root, text="Submit", command=submit_input)
