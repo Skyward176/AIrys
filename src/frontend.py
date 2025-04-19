@@ -6,11 +6,16 @@ import torchaudio
 import pyaudio
 import numpy as np
 from huggingface_hub import snapshot_download
-from SparkTTS.spark_loader import load_model, run_tts
 from tkinter import ttk # Using themed widgets for potentially better look
 from tkinter import scrolledtext # For scrollable text area
 
 from transformers import AutoTokenizer, AutoModelForCausalLM
+import subprocess
+import time
+import torch
+import torchaudio
+from gradio_client import Client, handle_file
+
 
 if torch.mps.is_available():
     device = torch.device("mps")
@@ -20,13 +25,12 @@ else:
     device = torch.device("cpu")
 
 
-# Load TTS model
-tts_model = load_model("src/models/Spark-TTS-0.5B", device=device)
-
 # Load LLM
-repo_id = "src/models/airysLlama/airys_llama_character_8B"
+repo_id = "src/models/airysLlama/airys_llama_character_1B"
 model, tokenizer = loadAirys(repo_id = repo_id)
 model.to(device)
+
+client = Client("http://localhost:7860")
 
 
 pipe = pipeline(
@@ -89,7 +93,12 @@ def get_llm_response(message):
         },
         {"role": "user", "content": message},
     ]
+    start_time = time.time()  # Start timing
+
     out = pipe(messages, max_new_tokens=2048)
+
+    end_time = time.time()  # End timing
+    print(f"LLM inference execution time: {end_time - start_time:.2f} seconds")
 
     llm_response = out[0]["generated_text"][-1]["content"]
     print(llm_response) # Debug print
@@ -102,20 +111,48 @@ def get_llm_response(message):
 
     chat_display.config(state=tk.DISABLED) # Disable editing
     chat_display.see(tk.END) # Scroll to the bottom
-    run_audio(llm_response) # Call the audio function
+    run_audio(client, llm_response) # Call the audio function
     # generate speech by cloning a voice using default settings
-def run_audio(text):
-    run_tts(
-        tts_model,
-        text=text,
-        reference_speech="miku_teto.wav",
-        prompt_text="In a cute, charming, and slightly awkward voice, say:",
-        gender='female',
-        pitch='very_high',
-        speed='moderate',
-        save_path="output.wav",
+def run_audio(client,text):
 
-    ) 
+    start_time = time.time()  # Start timing
+
+    result = client.predict(
+            model_choice="Zyphra/Zonos-v0.1-transformer",
+            text=text,
+            language="en-us",
+            speaker_audio=handle_file("./bocchi.wav"),
+            e1=1,
+            e2=0.05,
+            e3=0.05,
+            e4=0.05,
+            e5=0.05,
+            e6=0.05,
+            e7=0.1,
+            e8=0.2,
+            vq_single=0.78,
+            fmax=24000,
+            pitch_std=45,
+            speaking_rate=15,
+            dnsmos_ovrl=4,
+            speaker_noised=False,
+            cfg_scale=2,
+            top_p=0,
+            top_k=0,
+            min_p=0,
+            linear=0.5,
+            confidence=0.4,
+            quadratic=0,
+            seed=420,
+            randomize_seed=True,
+            unconditional_keys=["emotion"],
+            api_name="/generate_audio"
+    )
+    print(result)
+
+    end_time = time.time()  # End timing
+    print(f"TTS execution time: {end_time - start_time:.2f} seconds")
+
     audio = torchaudio.load("output.wav")[0].to(device)
     # Ensure the tensor is 2D
     if audio.dim() == 1:  # If the tensor is 1D, add a channel dimension
@@ -131,7 +168,7 @@ def run_audio(text):
     # Open a stream to play audio
     stream = p.open(format=pyaudio.paFloat32,
                     channels=1,
-                    rate=16000,  # Adjust the rate to match the slowdown
+                    rate=24000,  # Adjust the rate to match the slowdown
                     output=True)
 
     # Play the audio
@@ -139,8 +176,6 @@ def run_audio(text):
 
     # Close the stream
     stream.stop_stream()
-    stream.close()
-    p.terminate()
 
 
 

@@ -1,3 +1,5 @@
+huggingface/
+.vscode/
 src/SparkTTS/pretrained_models
 *.wav
 # Model
