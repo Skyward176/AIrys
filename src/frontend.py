@@ -7,6 +7,10 @@ import pyaudio
 import numpy as np
 from huggingface_hub import snapshot_download
 from SparkTTS.spark_loader import load_model, run_tts
+from tkinter import ttk # Using themed widgets for potentially better look
+from tkinter import scrolledtext # For scrollable text area
+
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 if torch.mps.is_available():
     device = torch.device("mps")
@@ -20,40 +24,59 @@ else:
 tts_model = load_model("src/models/Spark-TTS-0.5B", device=device)
 
 # Load LLM
-model, tokenizer = loadAirys(repo_id = "src/models/airysLlama/airys_llama_character_8B")
+repo_id = "src/models/airysLlama/airys_llama_character_8B"
+model, tokenizer = loadAirys(repo_id = repo_id)
 model.to(device)
-
-
-
 
 
 pipe = pipeline(
     "text-generation",
     model=model,
     tokenizer=tokenizer,
+    torch_dtype=torch.bfloat16,
     device_map="auto",
 )
+# --- Configuration ---
+BG_COLOR = '#212121'       # Main background
+FG_COLOR = '#FFFFFF'       # Main text color
+SIDEBAR_BG = '#333333'    # Sidebar background
+ENTRY_BG = '#424242'       # Input field background
+BUTTON_BG = '#555555'    # Button background
+BUTTON_FG = '#FFFFFF'    # Button text color
+LISTBOX_SELECT_BG = '#555555' # Listbox selection background
 
-# Create the main window
-root = tk.Tk()
-root.title("AIrys <3")
+# Conversation Thread Specific Colors (Optional)
+USER_MSG_BG = '#2c3e50'  # Slightly different background for user messages
+LLM_MSG_BG = '#34495e'   # Slightly different background for LLM messages
+USER_MSG_FG = '#ecf0f1'
+LLM_MSG_FG = '#ecf0f1'
 
-# Create a Text widget for user input
-input_textbox = tk.Text(root, width=40, height=10)
-input_textbox.pack(padx=10, pady=10)
+# --- Functions ---
+def send_message(event=None): # event=None allows binding to button click and Enter key
+    """Handles sending the message and displaying the conversation."""
+    message = input_entry.get()
+    if message.strip(): # Don't send empty messages
+        # --- Display User Message ---
+        chat_display.config(state=tk.NORMAL) # Enable editing
 
-# Create a Text widget for model responses
-response_textbox = tk.Text(root, width=40, height=10, state=tk.DISABLED)
-response_textbox.pack(padx=10, pady=10)
+        # Insert user message with 'user' tag
+        chat_display.insert(tk.END, "You:\n", ("label", "user_label")) # Label
+        chat_display.insert(tk.END, message + "\n\n", ("user",)) # Message content with tag
 
-# Function to handle submission and generate response
-def submit_input():
-    # Get user input
-    message = input_textbox.get("1.0", tk.END).strip()
-    if not message:
-        return
+        chat_display.config(state=tk.DISABLED) # Disable editing
+        chat_display.see(tk.END) # Scroll to the bottom
 
-    # Generate response using the model
+        # Clear the input field
+        input_entry.delete(0, tk.END)
+
+        # --- Placeholder for LLM interaction & Response ---
+        # In a real app, you would call your LLM here
+        # and then display the response using the 'llm' tag.
+        get_llm_response(message) # Call the simulation function
+
+    return "break" # Prevents default tkinter behavior (like adding newline on Enter)
+
+def get_llm_response(message):
     messages = [
         {"role": "system", "content": """Act as the character AIrys. Your response must fully embody her persona based on the following details:
         - Name: AIrys
@@ -66,24 +89,29 @@ def submit_input():
         },
         {"role": "user", "content": message},
     ]
-    out = pipe(messages)
+    out = pipe(messages, max_new_tokens=2048)
 
-    response = out[0]["generated_text"][-1]["content"]
+    llm_response = out[0]["generated_text"][-1]["content"]
+    print(llm_response) # Debug print
 
-    # Display the response in the response_textbox
-    response_textbox.config(state=tk.NORMAL)
-    response_textbox.delete("1.0", tk.END)
-    response_textbox.insert(tk.END, response)
-    response_textbox.config(state=tk.DISABLED)
+    chat_display.config(state=tk.NORMAL) # Enable editing
 
+    # Insert LLM response with 'llm' tag
+    chat_display.insert(tk.END, "AIrys:\n", ("label", "llm_label")) # Label
+    chat_display.insert(tk.END, llm_response + "\n\n", ("AIrys",)) # Message content with tag
+
+    chat_display.config(state=tk.DISABLED) # Disable editing
+    chat_display.see(tk.END) # Scroll to the bottom
+    run_audio(llm_response) # Call the audio function
     # generate speech by cloning a voice using default settings
+def run_audio(text):
     run_tts(
         tts_model,
-        text=response,
-        reference_speech="bocchi_sample.wav",
-        prompt_text=response,
+        text=text,
+        reference_speech="miku_teto.wav",
+        prompt_text="In a cute, charming, and slightly awkward voice, say:",
         gender='female',
-        pitch='high',
+        pitch='very_high',
         speed='moderate',
         save_path="output.wav",
 
@@ -114,9 +142,124 @@ def submit_input():
     stream.close()
     p.terminate()
 
-# Create a Submit button
-submit_button = tk.Button(root, text="Submit", command=submit_input)
-submit_button.pack(pady=10)
 
-# Run the applicLation
+
+def toggle_sound():
+    """Handles the sound toggle button click."""
+    if sound_enabled.get():
+        print("Sound Generation: ON")
+        sound_toggle_button.config(text="Sound ON")
+        # Add logic here to enable sound generation
+    else:
+        print("Sound Generation: OFF")
+        sound_toggle_button.config(text="Sound OFF")
+        # Add logic here to disable sound generation
+
+# --- Main Window Setup ---
+root = tk.Tk()
+root.title("AIrys Chat <3")
+root.geometry("900x700") # Adjusted size
+root.configure(bg=BG_COLOR)
+
+# --- Style Configuration (Optional, for ttk widgets) ---
+style = ttk.Style()
+try:
+    style.theme_use('clam') # 'clam' often looks better on Linux/Mac
+except tk.TclError:
+    print("Clam theme not available, using default.")
+
+style.configure("TFrame", background=BG_COLOR)
+style.configure("TLabel", background=BG_COLOR, foreground=FG_COLOR)
+style.configure("TButton", background=BUTTON_BG, foreground=BUTTON_FG)
+style.map("TButton", background=[('active', '#666666')]) # Button hover color
+style.configure("Horizontal.TScrollbar", background=BUTTON_BG, troughcolor=BG_COLOR)
+style.configure("Vertical.TScrollbar", background=BUTTON_BG, troughcolor=BG_COLOR)
+
+# --- Main Layout Frames ---
+root.grid_rowconfigure(0, weight=1)
+root.grid_columnconfigure(0, weight=1, minsize=200) # Sidebar column
+root.grid_columnconfigure(1, weight=4)             # Main content column
+
+# Sidebar Frame (Left)
+sidebar_frame = tk.Frame(root, width=250, bg=SIDEBAR_BG)
+sidebar_frame.grid(row=0, column=0, sticky="nsew")
+sidebar_frame.pack_propagate(False)
+
+# Main Content Frame (Right)
+main_frame = tk.Frame(root, bg=BG_COLOR)
+main_frame.grid(row=0, column=1, sticky="nsew")
+main_frame.grid_rowconfigure(0, weight=1) # Chat display row
+main_frame.grid_rowconfigure(1, weight=0) # Input area row
+main_frame.grid_columnconfigure(0, weight=1)
+
+# --- Sidebar Widgets ---
+logo_label = tk.Label(sidebar_frame, text="AIrys Chat <3", bg=SIDEBAR_BG, fg=FG_COLOR, font=("Arial", 14, "bold"))
+logo_label.pack(pady=10, padx=10, anchor='w')
+history_label = tk.Label(sidebar_frame, text="History", bg=SIDEBAR_BG, fg='#AAAAAA', font=("Arial", 10))
+history_label.pack(pady=(10, 2), padx=10, anchor='w')
+history_listbox = tk.Listbox(
+    sidebar_frame, bg=SIDEBAR_BG, fg=FG_COLOR, border=0, highlightthickness=0,
+    selectbackground=LISTBOX_SELECT_BG, activestyle='none'
+)
+history_listbox.pack(expand=True, fill="both", padx=10, pady=(0, 10))
+for i in range(15): history_listbox.insert(tk.END, f"Chat Session {i+1}")
+history_scrollbar = ttk.Scrollbar(history_listbox, orient="vertical", command=history_listbox.yview)
+history_scrollbar.pack(side="right", fill="y")
+history_listbox.config(yscrollcommand=history_scrollbar.set)
+
+# --- Main Content Widgets ---
+
+# Chat Display Area
+chat_display = scrolledtext.ScrolledText(
+    main_frame, wrap=tk.WORD, bg=BG_COLOR, fg=FG_COLOR, bd=0,
+    highlightthickness=0, state=tk.DISABLED, font=("Arial", 11), padx=10, pady=10
+)
+chat_display.grid(row=0, column=0, sticky="nsew", padx=10, pady=(10, 0))
+
+# --- Configure Text Tags for Conversation Styling ---
+# Common label style
+chat_display.tag_configure("label", font=("Arial", 10, "italic"), foreground="#AAAAAA")
+# User message style
+chat_display.tag_configure("user", justify='right', background=USER_MSG_BG, foreground=USER_MSG_FG, rmargin=10, spacing1=2, spacing3=10) # Add right margin (rmargin)
+chat_display.tag_configure("user_label", justify='right', rmargin=10)
+# LLM message style
+chat_display.tag_configure("AIrys <3", justify='left', background=LLM_MSG_BG, foreground=LLM_MSG_FG, lmargin1=10, lmargin2=10, spacing1=2, spacing3=10) # Add left margins (lmargin1, lmargin2)
+chat_display.tag_configure("llm_label", justify='left', lmargin1=10, lmargin2=10)
+
+# Initial message
+chat_display.config(state=tk.NORMAL)
+chat_display.insert(tk.END, "System:\n", ("label", "llm_label"))
+chat_display.insert(tk.END, "Start Typing to AIrys below: \n\n", ("AIrys",))
+chat_display.config(state=tk.DISABLED)
+
+# Input Area Frame (Bottom)
+input_frame = tk.Frame(main_frame, bg=BG_COLOR)
+input_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
+
+# Input Entry Field
+input_entry = tk.Entry(
+    input_frame, bg=ENTRY_BG, fg=FG_COLOR, insertbackground=FG_COLOR, font=("Arial", 11),
+    bd=0, highlightthickness=1, highlightbackground=SIDEBAR_BG, highlightcolor=BUTTON_BG
+)
+input_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=8, padx=(0, 10))
+input_entry.bind("<Return>", send_message)
+
+# Send Button
+send_button = tk.Button(
+    input_frame, text="Send", bg=BUTTON_BG, fg=BUTTON_FG, activebackground='#666666',
+    activeforeground=FG_COLOR, command=send_message, bd=0, padx=10, pady=5
+)
+send_button.pack(side=tk.LEFT)
+
+# Sound Toggle Button
+sound_enabled = tk.BooleanVar(value=False)
+sound_toggle_button = tk.Checkbutton(
+    input_frame, text="Sound OFF", variable=sound_enabled, command=toggle_sound,
+    indicatoron=False, bg=BUTTON_BG, fg=BUTTON_FG, selectcolor=ENTRY_BG,
+    activebackground='#666666', activeforeground=FG_COLOR, bd=0,
+    padx=10, pady=5, relief=tk.FLAT
+)
+sound_toggle_button.pack(side=tk.RIGHT, padx=(10, 0))
+
+# --- Start GUI ---
 root.mainloop()

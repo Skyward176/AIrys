@@ -15,8 +15,9 @@ def main():
     else:
         device = "cpu"
 
-    repo_id = "meta-llama/Llama-3.2-3B-Instruct"
-    #repo_id = "meta-llama/Meta-Llama-3-8B-Instruct"
+    #repo_id = "meta-llama/Llama-3.2-1B-Instruct"
+    #repo_id = "meta-llama/Llama-3.2-3B-Instruct"
+    repo_id = "meta-llama/Llama-3.1-8B-Instruct"
 
     nf4_config = BitsAndBytesConfig(
         load_in_4bit=True,
@@ -59,7 +60,7 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(repo_id, use_fast=True)
     tokenizer.pad_token = tokenizer.eos_token
     model.to(device)
-    dataset = load_dataset("csv", data_files="training_data/fine/airys_character_dataset.csv", split="train").shuffle()
+    dataset = load_dataset("csv", data_files="src/training_data/fine/airys_character_dataset.csv", split="train").shuffle()
 
     def apply_chat_template(input):
         messages = [
@@ -91,7 +92,7 @@ def main():
         save_strategy="epoch",
         save_total_limit=2,
         auto_find_batch_size=True,
-        num_train_epochs=10,  # How many times to loop through the dataset
+        num_train_epochs=4,  # How many times to loop through the dataset
         bf16=True,
         report_to="none", # Here we can use something like tensorboard to see the training metrics
         log_level="info",
@@ -109,7 +110,7 @@ def main():
 
     trainer.train()
 
-    trainer.save_model("models/airysLlama/airys_llama_character_3B")
+    trainer.save_model("models/airysLlama/airys_llama_character_8B")
 
 if __name__ == "__main__":
     main()
