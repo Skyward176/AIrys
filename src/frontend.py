@@ -1,10 +1,12 @@
 import tkinter as tk
-from transformers import SpeechT5Processor, SpeechT5ForTextToSpeech, SpeechT5HifiGan, pipeline
+from transformers import pipeline
 import torch
 from loadAirys import loadAirys
 import torchaudio
 import pyaudio
 import numpy as np
+from huggingface_hub import snapshot_download
+from SparkTTS.spark_loader import load_model, run_tts
 
 if torch.mps.is_available():
     device = torch.device("mps")
@@ -14,21 +16,12 @@ else:
     device = torch.device("cpu")
 
 
+# Load TTS model
+tts_model = load_model("src/models/Spark-TTS-0.5B", device=device)
+
 # Load LLM
 model, tokenizer = loadAirys(repo_id = "src/models/airysLlama/airys_llama_character_8B")
 model.to(device)
-
-
-processor = SpeechT5Processor.from_pretrained("microsoft/speecht5_tts")
-tts_model = SpeechT5ForTextToSpeech.from_pretrained("microsoft/speecht5_tts").to(device)
-vocoder = SpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan").to(device)
-
-speaker_embeddings = torch.zeros(1,512).to(device)
-#speaker_embeddings = torch.load("rvc/miku_default_rvc/weights/miku_default_rvc.pth")  # or load xvectors from a file
-def generate_speech(text, speaker_embeddings):
-    inputs = processor(text=text, return_tensors="pt").to(device)
-    speech = tts_model.generate(inputs["input_ids"], speaker_embeddings=speaker_embeddings, vocoder=vocoder)
-    return speech
 
 
 
@@ -83,8 +76,19 @@ def submit_input():
     response_textbox.insert(tk.END, response)
     response_textbox.config(state=tk.DISABLED)
 
-    audio = generate_speech(response, speaker_embeddings=speaker_embeddings)
+    # generate speech by cloning a voice using default settings
+    run_tts(
+        tts_model,
+        text=response,
+        reference_speech="bocchi_sample.wav",
+        prompt_text=response,
+        gender='female',
+        pitch='high',
+        speed='moderate',
+        save_path="output.wav",
 
+    ) 
+    audio = torchaudio.load("output.wav")[0].to(device)
     # Ensure the tensor is 2D
     if audio.dim() == 1:  # If the tensor is 1D, add a channel dimension
         audio = audio.unsqueeze(0)
@@ -99,7 +103,7 @@ def submit_input():
     # Open a stream to play audio
     stream = p.open(format=pyaudio.paFloat32,
                     channels=1,
-                    rate=20000,  # Adjust the rate to match the slowdown
+                    rate=16000,  # Adjust the rate to match the slowdown
                     output=True)
 
     # Play the audio

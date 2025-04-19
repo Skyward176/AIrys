@@ -1,3 +1,5 @@
+src/SparkTTS/pretrained_models
+*.wav
 # Model
 gpt-2
 .chainlit

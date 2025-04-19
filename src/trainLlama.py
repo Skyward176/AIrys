@@ -1,10 +1,7 @@
 import torch
 from huggingface_hub import hf_hub_download
 from transformers import AutoTokenizer, AutoModelForCausalLM, Conv1D
-from airysLib.config import ConfigLlama
 from safetensors.torch import load_file
-from airysLlama.LlamaGenerate import generate, text_to_token_ids, token_ids_to_text
-from airysLlama.loadLlamaFromPretrained import loadLlamaFromPretrained
 from datasets import load_dataset
 
 from transformers import Trainer, TrainingArguments, BitsAndBytesConfig
@@ -94,7 +91,7 @@ def main():
         save_strategy="epoch",
         save_total_limit=2,
         auto_find_batch_size=True,
-        num_train_epochs=40,  # How many times to loop through the dataset
+        num_train_epochs=10,  # How many times to loop through the dataset
         bf16=True,
         report_to="none", # Here we can use something like tensorboard to see the training metrics
         log_level="info",
