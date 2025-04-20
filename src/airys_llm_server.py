@@ -1,13 +1,27 @@
+import os
 import gradio as gr
+from gradio_client import Client, handle_file
 import time
 import random
-import torch
+import torch, torchaudio
 import threading
 from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer, pipeline
+from playsound import playsound
+import numpy as np
+from kokoro import KPipeline
+from IPython.display import display, Audio
+import soundfile as sf
+import torch
 
+if torch.mps.is_available():
+    defvice = torch.device("mps")
+elif torch.cuda.is_available():
+    device = torch.device("cuda")
+else:
+    device = torch.device("cpu")
 
-
-model_path = "src/models/airysLlama/airys_llama_character_1B"
+pipeline = KPipeline(lang_code='a')
+model_path = "src/models/airysLlama/airys_llama_character_8B"
 print(f"Loading model: {model_path}...")
 
 tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -23,9 +37,18 @@ model = AutoModelForCausalLM.from_pretrained(
 print("Model loaded successfully.")
 model_loaded = True
 
+def get_audio(text, pipeline):
+    os.remove("output.wav") # Clean up the audio file after playing
 
+    start_time = time.time()  # Start timing
 
-# --- Streaming Function using Transformers ---
+    generator = pipeline(text, voice='af_heart')
+    for i, (gs, ps, audio) in enumerate(generator):
+        sf.write("output.wav", audio, 24000)
+    end_time = time.time()  # End timing
+    
+    print(f"TTS execution time: {end_time - start_time:.2f} seconds")
+
 def transformers_streaming_llm(message: str, max_new_tokens=1024, temperature=0.7, top_p=0.9):
 
     messages = [
@@ -71,8 +94,12 @@ def transformers_streaming_llm(message: str, max_new_tokens=1024, temperature=0.
     # Yield generated tokens as they become available
     cumulative_response = ""
     try:
+        i = 0
         for new_text in streamer:
             if new_text is not None:
+                i += 1
+                if i % 5 ==0:
+                    i =0
                 cumulative_response += new_text
                 # print(f"Yielding: {cumulative_response}") # For debugging
                 yield cumulative_response
@@ -82,9 +109,11 @@ def transformers_streaming_llm(message: str, max_new_tokens=1024, temperature=0.
         yield cumulative_response + f"\n\n[Error during generation: {e}]"
     finally:
         # Ensure thread finishes
+        get_audio(cumulative_response, pipeline)
+        playsound("output.wav")
         if thread.is_alive():
             thread.join(timeout=1.0) # Add a timeout
-
+    
 with gr.Blocks() as demo:
     gr.Markdown("# Simple LLM Streaming Chat")
     gr.Markdown("Enter your prompt below and click 'Send'. The response will stream in the output box.")
@@ -114,5 +143,5 @@ with gr.Blocks() as demo:
 if __name__ == "__main__":
     # share=True creates a public link (use with caution)
     # Set server_name="0.0.0.0" to allow access from your network
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    demo.launch(server_name="0.0.0.0", server_port=7870)
     # demo.launch() # Launches on 127.0.0.1 (localhost) by default
