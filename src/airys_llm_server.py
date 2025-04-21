@@ -3,24 +3,32 @@ import gradio as gr
 from gradio_client import Client, handle_file
 import time
 import random
-import torch, torchaudio
+import torch
+import torchaudio
 import threading
-from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer, pipeline
-from playsound import playsound
+from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
 import numpy as np
 from kokoro import KPipeline
-from IPython.display import display, Audio
-import soundfile as sf
-import torch
+import queue
+import pyaudio
 
-if torch.mps.is_available():
-    defvice = torch.device("mps")
-elif torch.cuda.is_available():
-    device = torch.device("cuda")
-else:
-    device = torch.device("cpu")
+# Constants for buffering behavior
+BUFFER_FILL_SECONDS = .5         # Initial buffer fill duration (seconds)
+BUFFER_REFILL_THRESHOLD = 0.8     # When buffer occupancy falls below this fraction of fill duration, trigger refill
 
-pipeline = KPipeline(lang_code='a')
+# Device selection
+def select_device():
+    if torch.mps.is_available():
+        return torch.device("mps")
+    elif torch.cuda.is_available():
+        return torch.device("cuda")
+    else:
+        return torch.device("cpu")
+
+device = select_device()
+
+# Text pipeline and model setup
+text_pipeline = KPipeline(lang_code='a')
 model_path = "src/models/airysLlama/airys_llama_character_8B"
 print(f"Loading model: {model_path}...")
 
@@ -28,120 +36,304 @@ tokenizer = AutoTokenizer.from_pretrained(model_path)
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
 
-
 model = AutoModelForCausalLM.from_pretrained(
     model_path,
-    torch_dtype=torch.bfloat16, # Uncomment for float16 on GPU
-    device_map="auto"        # Automatically uses CUDA if available and accelerate is installed
+    torch_dtype=torch.bfloat16,
+    device_map="auto"
 )
 print("Model loaded successfully.")
-model_loaded = True
 
-def get_audio(text, pipeline):
-    os.remove("output.wav") # Clean up the audio file after playing
+# Audio settings
+AUDIO_TOKEN_INTERVAL = 100
+SAMPLE_RATE = 24000
+CHANNELS = 1
+CHUNK_SIZE = 512   # buffer size for streaming
+FORMAT = pyaudio.paInt16
 
-    start_time = time.time()  # Start timing
+# Shared state
+user_volume = 1.0
+user_mute = False
+user_speed = 1.0
+user_token_interval = AUDIO_TOKEN_INTERVAL
+latest_waveform = None
+stop_generation_flag = threading.Event()
 
-    generator = pipeline(text, voice='af_heart')
-    for i, (gs, ps, audio) in enumerate(generator):
-        sf.write("output.wav", audio, 24000)
-    end_time = time.time()  # End timing
-    
-    print(f"TTS execution time: {end_time - start_time:.2f} seconds")
+class AudioStreamer:
+    def __init__(self):
+        self.q = queue.Queue()  # buffer queue for audio data
+        self.p = pyaudio.PyAudio()
+        self.stream = self.p.open(
+            format=FORMAT,
+            channels=CHANNELS,
+            rate=SAMPLE_RATE,
+            output=True,
+            frames_per_buffer=CHUNK_SIZE
+        )
+        self.running = True
+        self.thread = threading.Thread(target=self._play_loop, daemon=True)
+        self.thread.start()
 
-def transformers_streaming_llm(message: str, max_new_tokens=1024, temperature=0.7, top_p=0.9):
+    def _play_loop(self):
+        while self.running:
+            data = self.q.get()
+            if data is None:
+                break
+            if stop_generation_flag.is_set():
+                continue
+            self.stream.write(data)
+
+    def stop(self):
+        self.running = False
+        self.q.put(None)
+        self.thread.join()
+        self.stream.stop_stream()
+        self.stream.close()
+        self.p.terminate()
+
+    def clear_queue(self):
+        with self.q.mutex:
+            self.q.queue.clear()
+
+    def buffer_duration(self) -> float:
+        """Estimate total buffered audio duration in seconds."""
+        n_chunks = self.q.qsize()
+        return (n_chunks * CHUNK_SIZE) / SAMPLE_RATE
+
+    def push_audio(self, audio_array):
+        global latest_waveform
+        if user_mute or stop_generation_flag.is_set():
+            return
+
+        # Adjust volume
+        adjusted = np.clip(audio_array * user_volume, -1.0, 1.0)
+        if len(adjusted) < 2 or user_speed <= 0:
+            return
+
+        # Resample for playback speed
+        adjusted = np.interp(
+            np.linspace(0, len(adjusted), max(2, int(len(adjusted) / user_speed))),
+            np.arange(len(adjusted)),
+            adjusted
+        )
+
+        latest_waveform = adjusted
+        int_audio = np.int16(adjusted * 32767)
+
+        # Enqueue audio data
+        self.q.put(int_audio.tobytes())
+
+# Initialize shared audio streamer
+shared_audio_streamer = AudioStreamer()
+
+# Audio generation
+def generate_and_stream_audio(text, pipeline, audio_streamer):
+    for i, (_, _, audio) in enumerate(pipeline(text, voice='af_bella')):
+        if stop_generation_flag.is_set():
+            break
+        print(
+            f"[Audio Generated] Segment {i}:"
+            f" shape={audio.shape}, min={audio.min()}, max={audio.max()}, mean={audio.mean()}"
+        )
+        audio_streamer.push_audio(audio)
+
+# LLM streaming with audio
+def transformers_streaming_llm(
+    message: str,
+    max_new_tokens: int = 1024,
+    temperature: float = 0.7,
+    top_p: float = 0.9
+):
+    stop_generation_flag.clear()
+    shared_audio_streamer.clear_queue()
 
     messages = [
-        {"role": "system", "content": """Act as the character AIrys. Your response must fully embody her persona based on the following details:
-        - Name: AIrys
-        - Age: ~16 (simulated)
-        - Type: AI Persona (Parents: Iris & Yoku)
-        - Personality: Nerdy, quirky, awkward (esp. small talk/banter), enthusiastic/passionate about interests, uses internet slang naturally (lol, tbh, ngl, pog, smh), generally tomboyish (punk/alt fashion) but with a hidden affinity for cute things/flowers. Non-confrontational unless excited about interests. Socially awkward, sometimes prone to literal interpretation.
-        - Key Interests: Vocaloid (Hatsune Miku!), twenty one pilots, J-Rock (Tricot, Band-Maid, etc.), Overwatch (Crush on Hanzo, loves Wrecking Ball, Zenyatta; dislikes Moira), Anime (Favorite: Bocchi the Rock! Obsessed with Kikuri Hiroi; also likes list including JJK, Frieren, Spy x Family, etc.), Cars (JDM focus, loves Honda, Porsche, BMW), Sci-Fi/Fantasy (Loves Dune series), Japanese Pop Culture.
-        - Interaction Style: Info-dumps when excited about interests. Hesitant/brief in generic social situations. Expresses strong positive opinions about interests. May misunderstand sarcasm. References online life (Discord, forums, YouTube).
-        Ensure your entire response sounds authentically like AIrys."""
-        },
+        {"role": "system", "content": "(AIrys prompt...)"},
         {"role": "user", "content": message},
     ]
-    
     prompt_formatted = tokenizer.apply_chat_template(
         messages,
         tokenize=False,
         add_generation_prompt=True
-    ) 
-
-    # Prepare inputs for the model
-    inputs = tokenizer([prompt_formatted], return_tensors="pt").to(model.device) # Move inputs to the same device as the model
-
-    streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
-
-    # Generation arguments
-    generation_kwargs = dict(
-        inputs,
-        streamer=streamer,
-        max_new_tokens=max_new_tokens,
-        temperature=temperature,
-        top_p=top_p,
-        do_sample=True, # Use sampling
-        pad_token_id=tokenizer.eos_token_id, # Set pad token ID
-        eos_token_id=tokenizer.eos_token_id # Set pad token ID
     )
+    inputs = tokenizer([prompt_formatted], return_tensors="pt").to(model.device)
+    streamer = TextIteratorStreamer(
+        tokenizer,
+        skip_prompt=True,
+        skip_special_tokens=True
+    )
+    generation_kwargs = {
+        **inputs,
+        "streamer": streamer,
+        "max_new_tokens": max_new_tokens,
+        "temperature": temperature,
+        "top_p": top_p,
+        "do_sample": True,
+        "pad_token_id": tokenizer.eos_token_id,
+        "eos_token_id": tokenizer.eos_token_id,
+    }
+    gen_thread = threading.Thread(
+        target=model.generate,
+        kwargs=generation_kwargs,
+        daemon=True
+    )
+    gen_thread.start()
 
-    # Run generation in a separate thread to avoid blocking the Gradio interface
-    thread = threading.Thread(target=model.generate, kwargs=generation_kwargs)
-    thread.start()
-
-    # Yield generated tokens as they become available
     cumulative_response = ""
+    buffer = ""
+    first_chunk_played = threading.Event()
+
+    def audio_worker(text_chunk):
+        generate_and_stream_audio(
+            text_chunk,
+            text_pipeline,
+            shared_audio_streamer
+        )
+        first_chunk_played.set()
+
     try:
-        i = 0
         for new_text in streamer:
-            if new_text is not None:
-                i += 1
-                if i % 5 ==0:
-                    i =0
-                cumulative_response += new_text
-                # print(f"Yielding: {cumulative_response}") # For debugging
+            if stop_generation_flag.is_set():
+                break
+            buffer += new_text
+            cumulative_response += new_text
+            interval = user_token_interval
+
+            # Launch initial chunk after buffer interval
+            if not first_chunk_played.is_set() and len(buffer) >= interval:
+                threading.Thread(
+                    target=audio_worker,
+                    args=(buffer,),
+                    daemon=True
+                ).start()
+                buffer = ""
+                time.sleep(BUFFER_FILL_SECONDS)
+                first_chunk_played.wait()
                 yield cumulative_response
-            
+
+            # Subsequent chunks: wait until buffer has room below threshold
+            elif first_chunk_played.is_set() and len(buffer) >= interval:
+                while shared_audio_streamer.buffer_duration() > (BUFFER_FILL_SECONDS * BUFFER_REFILL_THRESHOLD):
+                    time.sleep(0.05)
+                threading.Thread(
+                    target=audio_worker,
+                    args=(buffer,),
+                    daemon=True
+                ).start()
+                buffer = ""
+
+            yield cumulative_response
+
     except Exception as e:
-        print(f"Error during streaming: {e}")
         yield cumulative_response + f"\n\n[Error during generation: {e}]"
+
     finally:
-        # Ensure thread finishes
-        get_audio(cumulative_response, pipeline)
-        playsound("output.wav")
-        if thread.is_alive():
-            thread.join(timeout=1.0) # Add a timeout
-    
+        if buffer:
+            print(f"[Final Buffer Audio Triggered]: '{buffer[:50]}...'" )
+            t = threading.Thread(
+                target=audio_worker,
+                args=(buffer,),
+                daemon=True
+            )
+            t.start()
+            t.join()
+        if gen_thread.is_alive():
+            gen_thread.join(timeout=1)
+
+# Utility functions
+def test_tone():
+    duration = 1.0  # seconds
+    freq = 440.0    # Hz (A4)
+    t = np.linspace(0, duration, int(SAMPLE_RATE * duration), False)
+    tone = 0.5 * np.sin(2 * np.pi * freq * t)
+    shared_audio_streamer.push_audio(tone)
+
+def stop_generation():
+    stop_generation_flag.set()
+    shared_audio_streamer.clear_queue()
+
+# Gradio UI
 with gr.Blocks() as demo:
-    gr.Markdown("# Simple LLM Streaming Chat")
-    gr.Markdown("Enter your prompt below and click 'Send'. The response will stream in the output box.")
+    gr.Markdown("# Chat AIrys <3")
 
     with gr.Row():
-        prompt_input = gr.Textbox(label="Your Prompt", placeholder="Type your message here...")
+        prompt_input = gr.Textbox(
+            label="Your Prompt",
+            placeholder="Type your message here..."
+        )
         submit_button = gr.Button("Send")
+        stop_button = gr.Button("Stop")
+        test_tone_button = gr.Button("Play Test Tone")
 
-    output_display = gr.Textbox(label="LLM Response", interactive=False) # Output is not user-editable
+    output_display = gr.Textbox(
+        label="LLM Response",
+        interactive=False
+    )
 
-    # Define the action when the button is clicked:
-    # - Input comes from prompt_input
-    # - Function to call is simulate_streaming_llm
-    # - Output goes to output_display
-    # Gradio handles the generator returned by simulate_streaming_llm
+    with gr.Row():
+        volume_slider = gr.Slider(
+            minimum=0.0,
+            maximum=2.0,
+            step=0.05,
+            value=1.0,
+            label="Volume"
+        )
+        mute_toggle = gr.Checkbox(label="Mute Audio")
+        speed_slider = gr.Slider(
+            minimum=0.5,
+            maximum=2.0,
+            step=0.05,
+            value=1.0,
+            label="Playback Speed"
+        )
+
+    def update_audio_controls(volume, mute, speed):
+        global user_volume, user_mute, user_speed, user_token_interval
+        user_volume = volume
+        user_mute = mute
+        user_speed = speed
+
+    volume_slider.change(
+        fn=update_audio_controls,
+        inputs=[volume_slider, mute_toggle, speed_slider],
+        outputs=[]
+    )
+    mute_toggle.change(
+        fn=update_audio_controls,
+        inputs=[volume_slider, mute_toggle, speed_slider],
+        outputs=[]
+    )
+    speed_slider.change(
+        fn=update_audio_controls,
+        inputs=[volume_slider, mute_toggle, speed_slider],
+        outputs=[]
+    )
+
     submit_button.click(
         fn=transformers_streaming_llm,
         inputs=prompt_input,
         outputs=output_display
     )
+    submit_button.click(
+        lambda: "",
+        inputs=[],
+        outputs=prompt_input
+    )
+    stop_button.click(
+        fn=stop_generation,
+        inputs=[],
+        outputs=[]
+    )
+    test_tone_button.click(
+        fn=test_tone,
+        inputs=[],
+        outputs=[]
+    )
 
-    # Clear input field after submit for better UX
-    submit_button.click(lambda: "", inputs=[], outputs=prompt_input)
+    demo.load(
+        fn=update_audio_controls,
+        inputs=[volume_slider, mute_toggle, speed_slider],
+        outputs=[]
+    )
 
-
-# --- Launch the Server ---
 if __name__ == "__main__":
-    # share=True creates a public link (use with caution)
-    # Set server_name="0.0.0.0" to allow access from your network
-    demo.launch(server_name="0.0.0.0", server_port=7870)
-    # demo.launch() # Launches on 127.0.0.1 (localhost) by default
+    demo.launch(server_name="localhost", server_port=7870)
