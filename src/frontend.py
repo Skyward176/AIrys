@@ -21,14 +21,15 @@ if torch.mps.is_available():
     device = torch.device("mps")
 elif torch.cuda.is_available():
     device = torch.device("cuda")
+    print("Using CUDA")
 else:
     device = torch.device("cpu")
 
 
 # Load LLM
-repo_id = "src/models/airysLlama/airys_llama_character_1B"
+repo_id = "google/gemma-3-27b-it"
 model, tokenizer = loadAirys(repo_id = repo_id)
-model.to(device)
+#model.to(device)
 
 client = Client("http://localhost:7860")
 

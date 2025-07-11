@@ -13,7 +13,7 @@ def loadAirys(repo_id="models/airysLlama/airys_llama_character_8B"):
     model = AutoModelForCausalLM.from_pretrained(
         repo_id,
         device_map="auto",
-        use_flash_attention_2=True,
+        #use_flash_attention_2=True,
         torch_dtype=torch.bfloat16,
     )
     def get_specific_layer_names(model):

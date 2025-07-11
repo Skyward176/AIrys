@@ -11,6 +11,12 @@ import numpy as np
 from kokoro import KPipeline
 import queue
 import pyaudio
+import argparse
+
+
+
+# The server is designed to (well obiously) be the server. But it also provides a basic gradio ui for testing.
+# This ui will not be developed except to the extent that it is needed to while fleshing out the server's features.
 
 # Constants for buffering behavior
 BUFFER_FILL_SECONDS = .5         # Initial buffer fill duration (seconds)
@@ -29,7 +35,8 @@ device = select_device()
 
 # Text pipeline and model setup
 text_pipeline = KPipeline(lang_code='a')
-model_path = "src/models/airysLlama/airys_llama_character_8B"
+#model_path = "src/models/airysLlama/airys_llama_character_8B"
+model_path = "qwen/Qwen3-0.6B"
 print(f"Loading model: {model_path}...")
 
 tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -252,88 +259,138 @@ def stop_generation():
     shared_audio_streamer.clear_queue()
 
 # Gradio UI
-with gr.Blocks() as demo:
-    gr.Markdown("# Chat AIrys <3")
+def create_web_ui():
+    with gr.Blocks() as demo:
+        gr.Markdown("# Chat AIrys <3")
 
-    with gr.Row():
-        prompt_input = gr.Textbox(
-            label="Your Prompt",
-            placeholder="Type your message here..."
-        )
-        submit_button = gr.Button("Send")
-        stop_button = gr.Button("Stop")
-        test_tone_button = gr.Button("Play Test Tone")
+        with gr.Row():
+            prompt_input = gr.Textbox(
+                label="Your Prompt",
+                placeholder="Type your message here..."
+            )
+            submit_button = gr.Button("Send")
+            stop_button = gr.Button("Stop")
+            test_tone_button = gr.Button("Play Test Tone")
 
-    output_display = gr.Textbox(
-        label="LLM Response",
-        interactive=False
-    )
-
-    with gr.Row():
-        volume_slider = gr.Slider(
-            minimum=0.0,
-            maximum=2.0,
-            step=0.05,
-            value=1.0,
-            label="Volume"
-        )
-        mute_toggle = gr.Checkbox(label="Mute Audio")
-        speed_slider = gr.Slider(
-            minimum=0.5,
-            maximum=2.0,
-            step=0.05,
-            value=1.0,
-            label="Playback Speed"
+        output_display = gr.Textbox(
+            label="LLM Response",
+            interactive=False
         )
 
-    def update_audio_controls(volume, mute, speed):
-        global user_volume, user_mute, user_speed, user_token_interval
-        user_volume = volume
-        user_mute = mute
-        user_speed = speed
+        with gr.Row():
+            volume_slider = gr.Slider(
+                minimum=0.0,
+                maximum=2.0,
+                step=0.05,
+                value=1.0,
+                label="Volume"
+            )
+            mute_toggle = gr.Checkbox(label="Mute Audio")
+            speed_slider = gr.Slider(
+                minimum=0.5,
+                maximum=2.0,
+                step=0.05,
+                value=1.0,
+                label="Playback Speed"
+            )
 
-    volume_slider.change(
-        fn=update_audio_controls,
-        inputs=[volume_slider, mute_toggle, speed_slider],
-        outputs=[]
-    )
-    mute_toggle.change(
-        fn=update_audio_controls,
-        inputs=[volume_slider, mute_toggle, speed_slider],
-        outputs=[]
-    )
-    speed_slider.change(
-        fn=update_audio_controls,
-        inputs=[volume_slider, mute_toggle, speed_slider],
-        outputs=[]
-    )
+        def update_audio_controls(volume, mute, speed):
+            global user_volume, user_mute, user_speed, user_token_interval
+            user_volume = volume
+            user_mute = mute
+            user_speed = speed
 
-    submit_button.click(
-        fn=transformers_streaming_llm,
-        inputs=prompt_input,
-        outputs=output_display
-    )
-    submit_button.click(
-        lambda: "",
-        inputs=[],
-        outputs=prompt_input
-    )
-    stop_button.click(
-        fn=stop_generation,
-        inputs=[],
-        outputs=[]
-    )
-    test_tone_button.click(
-        fn=test_tone,
-        inputs=[],
-        outputs=[]
-    )
+        volume_slider.change(
+            fn=update_audio_controls,
+            inputs=[volume_slider, mute_toggle, speed_slider],
+            outputs=[]
+        )
+        mute_toggle.change(
+            fn=update_audio_controls,
+            inputs=[volume_slider, mute_toggle, speed_slider],
+            outputs=[]
+        )
+        speed_slider.change(
+            fn=update_audio_controls,
+            inputs=[volume_slider, mute_toggle, speed_slider],
+            outputs=[]
+        )
 
-    demo.load(
-        fn=update_audio_controls,
-        inputs=[volume_slider, mute_toggle, speed_slider],
-        outputs=[]
+        submit_button.click(
+            fn=transformers_streaming_llm,
+            inputs=prompt_input,
+            outputs=output_display
+        )
+        submit_button.click(
+            lambda: "",
+            inputs=[],
+            outputs=prompt_input
+        )
+        stop_button.click(
+            fn=stop_generation,
+            inputs=[],
+            outputs=[]
+        )
+        test_tone_button.click(
+            fn=test_tone,
+            inputs=[],
+            outputs=[]
+        )
+
+        demo.load(
+            fn=update_audio_controls,
+            inputs=[volume_slider, mute_toggle, speed_slider],
+            outputs=[]
+        )
+    
+    return demo
+
+def run_headless_server():
+    """
+    Run the server in headless mode.
+    You can implement API endpoints or other server functionality here.
+    """
+    print("AIrys LLM Server running in headless mode...")
+    print("Server ready for connections.")
+    print("Model loaded and audio pipeline initialized.")
+    print("Press Ctrl+C to stop the server.")
+    
+    try:
+        # Keep the server running
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\nShutting down AIrys LLM Server...")
+        shared_audio_streamer.stop()
+        print("Server stopped.")
+
+def main():
+    parser = argparse.ArgumentParser(description="AIrys LLM Server")
+    parser.add_argument(
+        "--webui", 
+        action="store_true", 
+        help="Launch with web UI (default headless server)"
     )
+    parser.add_argument(
+        "--host", 
+        default="localhost", 
+        help="Host to bind the web server to (default: localhost)"
+    )
+    parser.add_argument(
+        "--port", 
+        type=int, 
+        default=7870, 
+        help="Port to bind the web server to (default: 7870)"
+    )
+    
+    args = parser.parse_args()
+    
+    if args.webui:
+        print("Starting AIrys LLM Server with Web UI...")
+        demo = create_web_ui()
+        demo.launch(server_name=args.host, server_port=args.port)
+    else:
+        run_headless_server()
 
 if __name__ == "__main__":
-    demo.launch(server_name="localhost", server_port=7870)
+    main()
