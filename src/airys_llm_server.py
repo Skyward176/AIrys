@@ -2,16 +2,18 @@ import os
 import gradio as gr
 from gradio_client import Client, handle_file
 import time
-import random
 import torch
 import torchaudio
 import threading
-from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers.generation.streamers import TextIteratorStreamer
 import numpy as np
 from kokoro import KPipeline
 import queue
 import pyaudio
 import argparse
+
+from typing import Generator, Optional, Any, Iterator
 
 
 
@@ -23,7 +25,7 @@ BUFFER_FILL_SECONDS = .5         # Initial buffer fill duration (seconds)
 BUFFER_REFILL_THRESHOLD = 0.8     # When buffer occupancy falls below this fraction of fill duration, trigger refill
 
 # Device selection
-def select_device():
+def select_device()-> torch.device:
     if torch.mps.is_available():
         return torch.device("mps")
     elif torch.cuda.is_available():
@@ -31,19 +33,21 @@ def select_device():
     else:
         return torch.device("cpu")
 
-device = select_device()
+device: torch.device = select_device()
 
 # Text pipeline and model setup
-text_pipeline = KPipeline(lang_code='a')
+text_pipeline: KPipeline = KPipeline(lang_code='a')
 #model_path = "src/models/airysLlama/airys_llama_character_8B"
-model_path = "qwen/Qwen3-0.6B"
+model_path: str = "qwen/Qwen3-0.6B"
+
 print(f"Loading model: {model_path}...")
 
-tokenizer = AutoTokenizer.from_pretrained(model_path)
-if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
+tokenizer: AutoTokenizer = AutoTokenizer.from_pretrained(model_path) # type: ignore
 
-model = AutoModelForCausalLM.from_pretrained(
+if tokenizer.pad_token is None: # type: ignore
+    tokenizer.pad_token = tokenizer.eos_token # type: ignore
+
+model: AutoModelForCausalLM = AutoModelForCausalLM.from_pretrained( # type: ignore
     model_path,
     torch_dtype=torch.bfloat16,
     device_map="auto"
@@ -51,36 +55,36 @@ model = AutoModelForCausalLM.from_pretrained(
 print("Model loaded successfully.")
 
 # Audio settings
-AUDIO_TOKEN_INTERVAL = 100
-SAMPLE_RATE = 24000
-CHANNELS = 1
-CHUNK_SIZE = 512   # buffer size for streaming
-FORMAT = pyaudio.paInt16
+AUDIO_TOKEN_INTERVAL: int = 100
+SAMPLE_RATE: int = 24000
+CHANNELS: int = 1
+CHUNK_SIZE: int = 512   # buffer size for streaming
+FORMAT: int = pyaudio.paInt16
 
 # Shared state
-user_volume = 1.0
-user_mute = False
-user_speed = 1.0
-user_token_interval = AUDIO_TOKEN_INTERVAL
-latest_waveform = None
-stop_generation_flag = threading.Event()
+user_volume: float = 1.0
+user_mute: bool = False
+user_speed: float = 1.0
+user_token_interval: int = AUDIO_TOKEN_INTERVAL
+latest_waveform: Optional[np.ndarray[Any, Any]] = None
+stop_generation_flag: threading.Event = threading.Event()
 
 class AudioStreamer:
-    def __init__(self):
-        self.q = queue.Queue()  # buffer queue for audio data
-        self.p = pyaudio.PyAudio()
-        self.stream = self.p.open(
+    def __init__(self) -> None:
+        self.q: queue.Queue[Optional[bytes]] = queue.Queue()  # buffer queue for audio data
+        self.p: pyaudio.PyAudio = pyaudio.PyAudio()
+        self.stream: Any = self.p.open(
             format=FORMAT,
             channels=CHANNELS,
             rate=SAMPLE_RATE,
             output=True,
             frames_per_buffer=CHUNK_SIZE
         )
-        self.running = True
-        self.thread = threading.Thread(target=self._play_loop, daemon=True)
+        self.running: bool = True
+        self.thread: threading.Thread = threading.Thread(target=self._play_loop, daemon=True)
         self.thread.start()
 
-    def _play_loop(self):
+    def _play_loop(self) -> None:
         while self.running:
             data = self.q.get()
             if data is None:
@@ -89,7 +93,7 @@ class AudioStreamer:
                 continue
             self.stream.write(data)
 
-    def stop(self):
+    def stop(self) -> None:
         self.running = False
         self.q.put(None)
         self.thread.join()
@@ -97,16 +101,16 @@ class AudioStreamer:
         self.stream.close()
         self.p.terminate()
 
-    def clear_queue(self):
+    def clear_queue(self) -> None:
         with self.q.mutex:
             self.q.queue.clear()
 
     def buffer_duration(self) -> float:
         """Estimate total buffered audio duration in seconds."""
-        n_chunks = self.q.qsize()
+        n_chunks: int = self.q.qsize()
         return (n_chunks * CHUNK_SIZE) / SAMPLE_RATE
 
-    def push_audio(self, audio_array):
+    def push_audio(self, audio_array: np.ndarray[Any, Any]) -> None:
         global latest_waveform
         if user_mute or stop_generation_flag.is_set():
             return
@@ -130,18 +134,31 @@ class AudioStreamer:
         self.q.put(int_audio.tobytes())
 
 # Initialize shared audio streamer
-shared_audio_streamer = AudioStreamer()
+shared_audio_streamer: AudioStreamer = AudioStreamer()
 
 # Audio generation
-def generate_and_stream_audio(text, pipeline, audio_streamer):
-    for i, (_, _, audio) in enumerate(pipeline(text, voice='af_bella')):
+def generate_and_stream_audio(text: str, pipeline: KPipeline, audio_streamer: AudioStreamer) -> None:
+    # The pipeline can return a mix of types, so we iterate and check
+    for i, item in enumerate(pipeline(text, voice='af_bella')):
+        # Assuming the item is a tuple and the audio is the third element
+        if not isinstance(item, tuple) or len(item) < 3:
+            continue
+        
+        audio = item[2]
+        
+        # Ensure audio is a tensor before proceeding
+        if not isinstance(audio, torch.Tensor):
+            continue
+
         if stop_generation_flag.is_set():
             break
+        
         print(
             f"[Audio Generated] Segment {i}:"
             f" shape={audio.shape}, min={audio.min()}, max={audio.max()}, mean={audio.mean()}"
         )
-        audio_streamer.push_audio(audio)
+        # The push_audio function expects a numpy array, so we convert the tensor.
+        audio_streamer.push_audio(audio.cpu().numpy())
 
 # LLM streaming with audio
 def transformers_streaming_llm(
@@ -149,7 +166,7 @@ def transformers_streaming_llm(
     max_new_tokens: int = 1024,
     temperature: float = 0.7,
     top_p: float = 0.9
-):
+) -> Iterator[str]:
     stop_generation_flag.clear()
     shared_audio_streamer.clear_queue()
 
@@ -157,39 +174,39 @@ def transformers_streaming_llm(
         {"role": "system", "content": "(AIrys prompt...)"},
         {"role": "user", "content": message},
     ]
-    prompt_formatted = tokenizer.apply_chat_template(
+    prompt_formatted = tokenizer.apply_chat_template( # type: ignore
         messages,
         tokenize=False,
         add_generation_prompt=True
     )
-    inputs = tokenizer([prompt_formatted], return_tensors="pt").to(model.device)
+    inputs = tokenizer([prompt_formatted], return_tensors="pt").to(model.device) # type: ignore
     streamer = TextIteratorStreamer(
-        tokenizer,
+        tokenizer, # type: ignore
         skip_prompt=True,
         skip_special_tokens=True
     )
-    generation_kwargs = {
+    generation_kwargs: dict[str, Any] = {
         **inputs,
         "streamer": streamer,
         "max_new_tokens": max_new_tokens,
         "temperature": temperature,
         "top_p": top_p,
         "do_sample": True,
-        "pad_token_id": tokenizer.eos_token_id,
-        "eos_token_id": tokenizer.eos_token_id,
+        "pad_token_id": tokenizer.eos_token_id, # type: ignore
+        "eos_token_id": tokenizer.eos_token_id, # type: ignore
     }
     gen_thread = threading.Thread(
-        target=model.generate,
+        target=model.generate, # type: ignore
         kwargs=generation_kwargs,
         daemon=True
     )
     gen_thread.start()
 
-    cumulative_response = ""
-    buffer = ""
+    cumulative_response: str = ""
+    buffer: str = ""
     first_chunk_played = threading.Event()
 
-    def audio_worker(text_chunk):
+    def audio_worker(text_chunk: str) -> None:
         generate_and_stream_audio(
             text_chunk,
             text_pipeline,
@@ -247,19 +264,19 @@ def transformers_streaming_llm(
             gen_thread.join(timeout=1)
 
 # Utility functions
-def test_tone():
+def test_tone() -> None:
     duration = 1.0  # seconds
     freq = 440.0    # Hz (A4)
     t = np.linspace(0, duration, int(SAMPLE_RATE * duration), False)
     tone = 0.5 * np.sin(2 * np.pi * freq * t)
     shared_audio_streamer.push_audio(tone)
 
-def stop_generation():
+def stop_generation() -> None:
     stop_generation_flag.set()
     shared_audio_streamer.clear_queue()
 
 # Gradio UI
-def create_web_ui():
+def create_web_ui() -> gr.Blocks:
     with gr.Blocks() as demo:
         gr.Markdown("# Chat AIrys <3")
 
@@ -294,8 +311,8 @@ def create_web_ui():
                 label="Playback Speed"
             )
 
-        def update_audio_controls(volume, mute, speed):
-            global user_volume, user_mute, user_speed, user_token_interval
+        def update_audio_controls(volume: float, mute: bool, speed: float) -> None:
+            global user_volume, user_mute, user_speed
             user_volume = volume
             user_mute = mute
             user_speed = speed
@@ -345,7 +362,7 @@ def create_web_ui():
     
     return demo
 
-def run_headless_server():
+def run_headless_server() -> None:
     """
     Run the server in headless mode.
     You can implement API endpoints or other server functionality here.
@@ -364,12 +381,12 @@ def run_headless_server():
         shared_audio_streamer.stop()
         print("Server stopped.")
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="AIrys LLM Server")
     parser.add_argument(
-        "--webui", 
+        "--web", 
         action="store_true", 
-        help="Launch with web UI (default headless server)"
+        help="Launch with web UI (default: headless server)"
     )
     parser.add_argument(
         "--host", 
@@ -385,7 +402,7 @@ def main():
     
     args = parser.parse_args()
     
-    if args.webui:
+    if args.web:
         print("Starting AIrys LLM Server with Web UI...")
         demo = create_web_ui()
         demo.launch(server_name=args.host, server_port=args.port)
