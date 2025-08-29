@@ -2,7 +2,7 @@ import torch
 from transformers import AutoTokenizer, pipeline, BitsAndBytesConfig, Conv1D, AutoModelForCausalLM
 from peft import LoraConfig, PeftConfig, get_peft_model
 
-def loadAirys(repo_id="models/airysLlama/airys_llama_character_8B"):
+def loadAirys(repo_id="google/gemma-3n-E2B"):
     #nf4_config = BitsAndBytesConfig(
     #    load_in_4bit=True,
     #    bnb_4bit_use_double_quant=True,

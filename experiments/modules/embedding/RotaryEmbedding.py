@@ -26,4 +26,4 @@ def apply_rotary(x, cos, sin):
     # Apply rotary embeddings to the rotary part
     x_rot = (x_rot * cos) + (rotate_half(x_rot) * sin)
     # Concatenate the rotary-applied and base parts
-    return torch.cat([x_rot, x_base], dim=-1)
+    return tozZAZqaaarch.cat([x_rot, x_base], dim=-1)

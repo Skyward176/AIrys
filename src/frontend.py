@@ -26,9 +26,11 @@ else:
 
 
 # Load LLM
-repo_id = "src/models/airysLlama/airys_llama_character_1B"
+#repo_id = "src/models/airysLlama/airys_llama_character_1B"
+repo_id = "Qwen/Qwen3-0.6B"
 model, tokenizer = loadAirys(repo_id = repo_id)
 model.to(device)
+
 
 client = Client("http://localhost:7860")
 
