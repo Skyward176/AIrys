@@ -36,10 +36,10 @@ def select_device()-> torch.device:
 device: torch.device = select_device()
 
 # Text pipeline and model setup
-text_pipeline: KPipeline = KPipeline(lang_code='a')
+text_pipeline = KPipeline(lang_code='a')
 #model_path = "src/models/airysLlama/airys_llama_character_8B"
-model_path: str = "qwen/Qwen3-0.6B"
 
+model_path = "Qwen/Qwen3-0.6B"
 print(f"Loading model: {model_path}...")
 
 tokenizer: AutoTokenizer = AutoTokenizer.from_pretrained(model_path) # type: ignore
